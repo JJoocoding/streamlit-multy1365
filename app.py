@@ -6,14 +6,14 @@ import itertools
 import json
 import xmltodict
 from datetime import datetime
-import re # 정규표현식 모듈 import
+import re 
 
 st.set_page_config(layout="wide")
 st.title("🏗️ 1365 사정율 분석 도구")
 st.markdown("공고번호를 입력하면 복수예가 조합, 낙찰하한율, 개찰결과를 분석해 드립니다.")
 
 display_width = st.selectbox("📏 표 표시 너비 설정", ["자동(전체 너비)", "고정(좁게)"])
-use_wide = display_width == "자동(전체 너비)"
+use_wide = display_width == "자동(전체 너비)" # 오류 수정: 닫는 괄호 제거
 
 st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
 gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", height=200)
@@ -205,7 +205,7 @@ if st.button("분석 시작") and gongo_nums_input:
 
             # --- 통합 사정율 분석 결과 (새로운 형식) 섹션 ---
             st.markdown("---") 
-            st.subheader("📊 통합 사정율 분석 결과")
+            st.subheader("📊 통합 사정율 분석 결과") # 큰 글씨의 1순위 정보 삭제
 
             merged_df = pd.DataFrame()
             top_bidder_info_for_header = {} 
@@ -221,7 +221,7 @@ if st.button("분석 시작") and gongo_nums_input:
                 top_bidder = result_data["top_bidder"]
                 
                 df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
-                # 컬럼명을 공고번호로 설정
+                # 컬럼명을 공고번호로 설정 (실제 DataFrame 컬럼명)
                 df_for_merge.rename(columns={'강조_업체명': f'{gongo_num}'}, inplace=True) 
                 
                 merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
@@ -232,34 +232,27 @@ if st.button("분석 시작") and gongo_nums_input:
             if not merged_df.empty:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
-                # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 및 글자 크기 조정 ---
-                column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
-                
+                # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 ---
+                column_config_dict = {} # 'rate' 컬럼은 기본으로 표시됨
+
                 for gongo_num_col in gongo_nums:
                     top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
                     
-                    # HTML과 CSS를 사용하여 글자 크기 조절 및 줄 바꿈
-                    header_html = f"<div style='text-align: center; font-size: 11px; line-height: 1.2;'><b>{gongo_num_col}</b><br>"
+                    # 이제 label은 일반 텍스트이거나 마크다운 형식으로 변경
+                    header_text = f"**{gongo_num_col}**\n" # 공고번호는 항상 표시, 줄바꿈은 \n
                     if top_info["name"] != "개찰 결과 없음":
-                        # 업체명과 사정율은 더 작은 글씨로
-                        header_html += f"<span style='font-size: 10px;'><b>{top_info['name']}</b><br>(사정율: <b>{top_info['rate']:.5f}%</b>)</span>"
+                        header_text += f"*{top_info['name']}*\n(사정율: {top_info['rate']:.5f}%)"
                     else:
-                        header_html += "<span style='font-size: 10px;'>개찰 결과 없음</span>"
-                    header_html += "</div>"
+                        header_text += "개찰 결과 없음"
                     
                     column_config_dict[gongo_num_col] = st.column_config.TextColumn(
-                        label=header_html, # 여기에 HTML을 직접 전달
+                        label=header_text, 
                         width="small" # 필요에 따라 'small', 'medium', 'large' 또는 픽셀 단위로 조절
                     )
                 
                 # Styler 함수 (통합 테이블용) - 현재 처리 중인 컬럼의 1순위 업체명만 강조
                 def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
-                    # s.name은 컬럼 헤더 문자열 (예: 'R25BK00862885')
-                    # top_bidder_info_map에서 해당 컬럼의 원본 공고번호를 찾아야 함
-                    
-                    # column_config에서 설정한 label은 실제 df.columns에 영향을 주지 않으므로
-                    # s.name은 여전히 원본 공고번호 문자열입니다.
-                    current_gongo_num_raw = s.name 
+                    current_gongo_num_raw = s.name # 컬럼 이름 (예: 'R25BK00862885')
 
                     top_info = top_bidder_info_map.get(current_gongo_num_raw) 
 
