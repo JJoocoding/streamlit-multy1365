@@ -274,12 +274,12 @@ if st.button("분석 시작") and gongo_nums_input:
                 for gongo_num_col in gongo_nums:
                     top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
                     
-                    # label에 업체명 제외하고 공고번호와 사정율만 표시합니다.
-                    header_text = f"**{gongo_num_col}**\n" # 공고번호는 항상 표시
-                    if top_info["name"] != "개찰 결과 없음":
-                        header_text += f"(사정율: {top_info['rate']:.5f}%)"
+                    # label에 업체명과 "사정율" 글씨 제외하고 공고번호와 낙찰율 숫자만 표시
+                    header_text = f"{gongo_num_col}\n" # 공고번호는 항상 표시
+                    if top_info["name"] != "개찰 결과 없음" and top_info["rate"] != "N/A":
+                        header_text += f"{top_info['rate']:.5f}%"
                     else:
-                        header_text += "개찰 결과 없음"
+                        header_text += "정보 없음" # 1순위 정보가 없거나 N/A일 경우
                     
                     column_config_dict[gongo_num_col] = st.column_config.TextColumn(
                         label=header_text, 
