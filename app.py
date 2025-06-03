@@ -126,17 +126,18 @@ def analyze_gongo(gongo_nm):
 
         # ▶ 사정율 + 업체명 결합
         df_combined_gongo = pd.concat([
-            df_rates[['rate']].assign(업체명=df_rates['조합순번'].astype(str) + '조합'),
+            # 변경: '조합' 문자열 제거
+            df_rates[['rate']].assign(업체명=df_rates['조합순번'].astype(str)), 
             df4.rename(columns={'업체명': '업체명'})
         ], ignore_index=True).sort_values('rate').reset_index(drop=True)
         df_combined_gongo['rate'] = round(df_combined_gongo['rate'], 5)
         
-        # <<< 변경 사항: 여기에 '공고번호' 컬럼 추가 >>>
         df_combined_gongo['공고번호'] = gongo_nm 
 
         # ▶ 강조 컬럼 추가: 1순위 업체명과 일치하면 강조 (더 눈에 띄게)
+        # 변경: 텍스트 강조 이모지 변경 (더 눈에 띄도록)
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'].apply(
-            lambda x: f"✨ **{x}**" if x == top_bidder_info['name'] else x
+            lambda x: f"🏆 **{x}**" if x == top_bidder_info['name'] else x
         )
         
         return df_combined_gongo, None, top_bidder_info 
@@ -145,9 +146,6 @@ def analyze_gongo(gongo_nm):
         return pd.DataFrame(), f"⚠️ 경고: 공고번호 {gongo_nm} - {ve}", top_bidder_info
     except Exception as e:
         return pd.DataFrame(), f"❌ 오류 발생: 공고번호 {gongo_nm} - {e}", top_bidder_info
-
-
-
 
 if st.button("분석 시작") and gongo_nums_input:
     gongo_nums = [gn.strip() for gn in gongo_nums_input.split('\n') if gn.strip()]
@@ -203,27 +201,35 @@ if st.button("분석 시작") and gongo_nums_input:
                         else:
                             st.markdown(f"**공고번호 {gongo_num}**: 개찰 결과 정보 없음")
                         
-                        # 표 생성 (공고번호 컬럼 제외)
-                        # df에서 '공고번호' 컬럼을 제외하고 출력
-                        display_df = df[['rate', '강조_업체명']]
-                        st.data_editor(
-                            display_df,
+                        # 변경: st.data_editor 대신 st.dataframe 사용 (스타일링을 위해)
+                        # 그리고 styler 객체를 사용하여 1순위 업체 행에 노란색 배경색 적용
+                        
+                        # 1순위 업체가 '업체명' 컬럼에 있는지 확인하는 함수
+                        def highlight_top_bidder(row):
+                            color = 'background-color: yellow'
+                            # '강조_업체명'에 🏆 이모지가 있는 행을 찾아서 강조
+                            if '🏆' in str(row['강조_업체명']):
+                                return [color] * len(row)
+                            return [''] * len(row)
+
+                        display_df_styled = df[['rate', '강조_업체명']].style.apply(highlight_top_bidder, axis=1)
+
+                        st.dataframe(
+                            display_df_styled,
                             use_container_width=True,
-                            disabled=True,
-                            height=min(35 * len(display_df) + 38, 400) # 데이터 개수에 따라 높이 조절
+                            hide_index=True, # 인덱스 숨기기
+                            height=min(35 * len(df) + 38, 400) # 데이터 개수에 따라 높이 조절
                         )
                         st.markdown("---") # 각 공고별 결과 구분선
 
             # 전체 결과를 통합하여 엑셀 다운로드를 위해 저장
-            # 다운로드할 데이터프레임 생성 (여기서는 공고번호 컬럼 포함)
             all_results_df_for_download = pd.concat([res["df"] for res in results_by_gongo], ignore_index=True)
             
-            # 다운로드 버튼은 모든 개별 표시가 끝난 후에 한 번만 표시
             st.subheader("📥 전체 결과 다운로드")
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"통합_사정율분석_{now}.xlsx"
             download_df = all_results_df_for_download.copy()
-            download_df['업체명'] = download_df['강조_업체명'].str.replace('✨ ', '').str.replace('**', '') # 강조 표시 및 볼드체 마크다운 제거
+            download_df['업체명'] = download_df['강조_업체명'].str.replace('🏆 ', '').str.replace('**', '') # 강조 표시 및 볼드체 마크다운 제거
             download_df = download_df[['공고번호', 'rate', '업체명']] # 다운로드 시에는 공고번호 컬럼 포함
             download_df.to_excel(filename, index=False)
             with open(filename, "rb") as f:
