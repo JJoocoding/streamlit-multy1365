@@ -6,11 +6,49 @@ import itertools
 import json
 import xmltodict
 from datetime import datetime
-import re 
+import re
 
 st.set_page_config(layout="wide")
 st.title("🏗️ 1365 사정율 분석 도구")
 st.markdown("공고번호를 입력하면 복수예가 조합, 낙찰하한율, 개찰결과를 분석해 드립니다.")
+
+# 커스텀 CSS 삽입
+st.markdown("""
+<style>
+/* 통합 사정율 테이블 헤더 셀 스타일 */
+.stDataFrame .st-emotion-cache-16ffz97 { /* 이 셀렉터는 Streamlit 버전에 따라 변경될 수 있음 */
+    white-space: normal !important; /* 강제로 줄바꿈 적용 */
+    word-wrap: break-word !important; /* 단어 중간에도 줄바꿈 허용 */
+    text-align: center; /* 텍스트 가운데 정렬 */
+    vertical-align: middle; /* 세로 가운데 정렬 */
+    padding: 5px; /* 패딩 조정 */
+}
+/* 각 공고별 사정율 테이블 헤더 셀 스타일 (필요시) */
+.stDataFrame .st-emotion-cache-f1g0i0.e1gz00974 { /* 이 셀렉터도 Streamlit 버전에 따라 변경될 수 있음 */
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    text-align: center;
+    vertical-align: middle;
+    padding: 5px;
+}
+
+/* 일반적인 Streamlit 컬럼 헤더 스타일 (안전한 셀렉터) */
+.stDataFrame > div > div > div > div > div > div:nth-child(2) > div > div:nth-child(1) > div > div {
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    text-align: center;
+    vertical-align: middle;
+    padding: 5px;
+}
+
+/* Rate 컬럼 헤더만 좌측 정렬 유지 (선택 사항) */
+.stDataFrame > div > div > div > div > div > div:nth-child(2) > div > div:nth-child(1) > div:nth-child(1) > div {
+    text-align: left !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 
 display_width = st.selectbox("📏 표 표시 너비 설정", ["자동(전체 너비)", "고정(좁게)"])
 use_wide = display_width == "자동(전체 너비)" # 오류 수정: 닫는 괄호 제거
@@ -205,7 +243,7 @@ if st.button("분석 시작") and gongo_nums_input:
 
             # --- 통합 사정율 분석 결과 (새로운 형식) 섹션 ---
             st.markdown("---") 
-            st.subheader("📊 통합 사정율 분석 결과") # 큰 글씨의 1순위 정보 삭제
+            st.subheader("📊 통합 사정율 분석 결과") 
 
             merged_df = pd.DataFrame()
             top_bidder_info_for_header = {} 
@@ -233,26 +271,27 @@ if st.button("분석 시작") and gongo_nums_input:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
                 # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 ---
-                column_config_dict = {} # 'rate' 컬럼은 기본으로 표시됨
+                column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
 
                 for gongo_num_col in gongo_nums:
                     top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
                     
-                    # 이제 label은 일반 텍스트이거나 마크다운 형식으로 변경
-                    header_text = f"**{gongo_num_col}**\n" # 공고번호는 항상 표시, 줄바꿈은 \n
+                    # label은 마크다운 형식으로 변경
+                    # CSS를 통해 줄바꿈을 강제하므로 \n은 필요 없음
+                    header_text = f"**{gongo_num_col}**<br>" # 공고번호는 항상 표시
                     if top_info["name"] != "개찰 결과 없음":
-                        header_text += f"*{top_info['name']}*\n(사정율: {top_info['rate']:.5f}%)"
+                        header_text += f"*{top_info['name']}*<br>(사정율: {top_info['rate']:.5f}%)"
                     else:
                         header_text += "개찰 결과 없음"
                     
                     column_config_dict[gongo_num_col] = st.column_config.TextColumn(
                         label=header_text, 
-                        width="small" # 필요에 따라 'small', 'medium', 'large' 또는 픽셀 단위로 조절
+                        width="small" 
                     )
                 
                 # Styler 함수 (통합 테이블용) - 현재 처리 중인 컬럼의 1순위 업체명만 강조
                 def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
-                    current_gongo_num_raw = s.name # 컬럼 이름 (예: 'R25BK00862885')
+                    current_gongo_num_raw = s.name 
 
                     top_info = top_bidder_info_map.get(current_gongo_num_raw) 
 
@@ -273,7 +312,7 @@ if st.button("분석 시작") and gongo_nums_input:
                     use_container_width=True,
                     hide_index=True,
                     height=min(35 * len(final_merged_df) + 38, 600),
-                    column_config=column_config_dict # 생성한 column_config 적용
+                    column_config=column_config_dict 
                 )
             else:
                 st.info("분석할 유효한 공고번호가 없거나 데이터 병합에 실패했습니다.")
