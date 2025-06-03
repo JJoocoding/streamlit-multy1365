@@ -24,6 +24,7 @@ def analyze_gongo(gongo_nm):
         headers = {'User-Agent': 'Mozilla/5.0'}
         service_key = st.secrets["SERVICE_KEY"] 
 
+
         # ▶ 복수예가 상세
         url1 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoCnstwkPreparPcDetail?inqryDiv=2&bidNtceNo={gongo_nm}&bidNtceOrd=00&pageNo=1&numOfRows=15&type=json&ServiceKey={service_key}'
         res1 = requests.get(url1, headers=headers)
@@ -120,7 +121,6 @@ def analyze_gongo(gongo_nm):
         
         df_combined_gongo['공고번호'] = gongo_nm 
 
-        # 강조 컬럼 (순수 업체명, 1순위 강조용)
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'].apply(
             lambda x: f"🏆 **{x}**" if x == top_bidder_info['name'] else x
         )
@@ -200,76 +200,81 @@ if st.button("분석 시작") and gongo_nums_input:
                         st.markdown("---") 
 
             # --- 통합 사정율 분석 결과 (새로운 형식) 섹션 ---
-            st.markdown("---") # 구분선
+            st.markdown("---") 
             st.subheader("📊 통합 사정율 분석 결과")
 
-            # 1. 모든 공고별 결과를 'rate' 기준으로 정렬하여 하나의 기준 DataFrame 생성
-            # 각 공고별 DataFrame에서 'rate'와 '강조_업체명'만 가져오고, '강조_업체명'을 각 공고에 특화된 컬럼명으로 변경
-            
-            merged_df_list = []
+            merged_df = pd.DataFrame()
             top_bidder_info_for_header = {} # 컬럼 헤더 위에 표시할 1순위 정보 저장
 
             # 초기 'rate' 컬럼을 위한 DataFrame 생성
             if results_by_gongo:
-                base_rates_df = pd.DataFrame({'rate': results_by_gongo[0]['df']['rate'].unique()}).sort_values('rate').reset_index(drop=True)
-                merged_df_list.append(base_rates_df)
-
+                # 첫 번째 공고의 rate만 가져와서 병합의 시작점으로 사용
+                # 모든 가능한 rate 값을 포함하기 위해 모든 df에서 rate를 추출 후 unique 값 사용
+                all_rates = pd.concat([res['df']['rate'] for res in results_by_gongo], ignore_index=True).unique()
+                base_rates_df = pd.DataFrame({'rate': all_rates}).sort_values('rate').reset_index(drop=True)
+                merged_df = base_rates_df
+            
+            # 각 공고별 데이터를 merged_df에 병합
             for i, result_data in enumerate(results_by_gongo):
                 gongo_num = result_data["gongo_num"]
                 df_current_gongo = result_data["df"].copy()
                 top_bidder = result_data["top_bidder"]
                 
-                # 공고별 업체명 컬럼 생성 (사정율과 업체명을 매핑)
-                # 'rate'와 '강조_업체명'만 사용
                 df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
-                # 컬럼 이름 변경: '강조_업체명' -> '공고번호_업체명'
+                # 컬럼 이름 변경: '강조_업체명' -> '공고번호_업체명' (이 컬럼명이 실제 테이블 헤더가 됨)
                 df_for_merge.rename(columns={'강조_업체명': f'공고번호 {gongo_num}'}, inplace=True)
                 
                 # 'rate' 기준으로 외부 조인 (outer join)하여 모든 rate 값을 유지
-                if i == 0:
-                    merged_df = df_for_merge
-                else:
-                    merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer', suffixes=('_left', '_right'))
+                merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
                 
                 # 컬럼 헤더 위에 표시할 1순위 정보 저장
                 top_bidder_info_for_header[f'공고번호 {gongo_num}'] = top_bidder
 
             # 최종 통합 DataFrame 정렬 (rate 기준)
-            if 'merged_df' in locals(): # merged_df가 생성된 경우에만 처리
+            if not merged_df.empty: # merged_df가 비어있지 않은 경우에만 처리
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
                 # 컬럼 헤더 (1순위 업체 정보) 표시
-                header_cols = st.columns([1] + [1] * len(gongo_nums)) # rate 컬럼을 위해 1, 나머지 공고별 컬럼을 위해 gongo_nums 개수만큼 1
+                # Rate 컬럼 + 각 공고번호 컬럼 수만큼 할당
+                header_cols_widths = [1] + [1] * len(gongo_nums)
+                header_cols = st.columns(header_cols_widths)
                 
                 with header_cols[0]:
-                    st.markdown("**Rate**") # Rate 컬럼 헤더
+                    st.markdown("<div style='text-align: center; font-weight: bold;'>Rate</div>", unsafe_allow_html=True) 
                 
                 for idx, gongo_num_str in enumerate(gongo_nums):
                     col_key = f'공고번호 {gongo_num_str}'
-                    with header_cols[idx + 1]: # 첫 번째 컬럼은 Rate이므로 +1
+                    with header_cols[idx + 1]: 
                         top_info = top_bidder_info_for_header.get(col_key, {"name": "정보 없음", "rate": "N/A"})
+                        
+                        # 1순위 업체명과 사정율을 함께 표시 (새로운 요청)
                         if top_info["name"] != "개찰 결과 없음":
                             st.markdown(
                                 f"<div style='text-align: center; font-size: 14px;'>"
                                 f"**{top_info['name']}**<br>"
-                                f"(사정율: {top_info['rate']:.5f}%)"
+                                f"(사정율: **{top_info['rate']:.5f}%**)" # 사정율 소수점 5자리까지 표시
                                 f"</div>",
                                 unsafe_allow_html=True
                             )
                         else:
                             st.markdown(f"<div style='text-align: center; font-size: 14px;'>개찰 결과 없음</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div style='text-align: center; font-weight: bold;'>{col_key}</div>", unsafe_allow_html=True) # 공고번호 컬럼명
+                        
+                        # 공고번호 자체를 bold 처리
+                        st.markdown(f"<div style='text-align: center; font-weight: bold;'>{gongo_num_str}</div>", unsafe_allow_html=True) 
                 
-                # 스타일러 함수 (통합 테이블용)
-                def highlight_top_bidder_in_merged_table(val, top_bidder_name):
-                    if isinstance(val, str) and top_bidder_name in val:
-                        return 'background-color: yellow'
+                # Styler 함수 (통합 테이블용)
+                # 이제 '강조_업체명' 대신 각 '공고번호 XXX' 컬럼의 값에서 순수 업체명을 추출하여 비교
+                def highlight_top_bidder_in_merged_table(val, top_bidder_name_raw):
+                    # val이 NaN이 아닐 때만 처리
+                    if pd.notna(val) and isinstance(val, str):
+                        # val에서 '🏆 **'와 '**'를 제거하여 순수 업체명만 추출
+                        clean_val = val.replace('🏆 **', '').replace('**', '').strip()
+                        if clean_val == top_bidder_name_raw:
+                            return 'background-color: yellow'
                     return ''
 
-                # Styler를 적용하여 DataFrame 표시
                 styled_final_merged_df = final_merged_df.style
                 for col_name, top_info in top_bidder_info_for_header.items():
-                    # '공고번호 NNNNNNNNN' 컬럼에 해당하는 1순위 업체명을 찾아서 적용
                     top_bidder_name_raw = top_info['name'] # 강조 이모지가 없는 순수 업체명
                     if top_bidder_name_raw != "정보 없음" and top_bidder_name_raw != "개찰 결과 없음":
                         styled_final_merged_df = styled_final_merged_df.applymap(
@@ -292,8 +297,6 @@ if st.button("분석 시작") and gongo_nums_input:
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"통합_사정율분석_{now}.xlsx"
             
-            # 다운로드 DataFrame은 이전처럼 모든 공고를 세로로 concat한 것
-            # 각 공고별 df에 이미 '공고번호' 컬럼이 있으므로 그대로 사용
             all_results_df_for_download = pd.concat([res["df"] for res in results_by_gongo], ignore_index=True)
             download_df = all_results_df_for_download.copy()
             download_df['업체명'] = download_df['강조_업체명'].str.replace('🏆 ', '').str.replace('**', '') 
