@@ -2,5 +2,4 @@ streamlit
 pandas
 numpy
 requests
-json # 기본 라이브러리라 명시할 필요는 없지만, 명시해도 무방
 xmltodict
