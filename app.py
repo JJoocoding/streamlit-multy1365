@@ -12,46 +12,47 @@ st.set_page_config(layout="wide")
 st.title("🏗️ 1365 사정율 분석 도구")
 st.markdown("공고번호를 입력하면 복수예가 조합, 낙찰하한율, 개찰결과를 분석해 드립니다.")
 
-# 커스텀 CSS 삽입
+# 커스텀 CSS 삽입 - 줄바꿈을 강제하고 폰트 크기 조절 시도
 st.markdown("""
 <style>
 /* 통합 사정율 테이블 헤더 셀 스타일 */
-.stDataFrame .st-emotion-cache-16ffz97 { /* 이 셀렉터는 Streamlit 버전에 따라 변경될 수 있음 */
-    white-space: normal !important; /* 강제로 줄바꿈 적용 */
-    word-wrap: break-word !important; /* 단어 중간에도 줄바꿈 허용 */
+/* .stDataFrame은 st.dataframe의 가장 바깥쪽 컨테이너 */
+/* 이 셀렉터는 Streamlit 버전에 따라 변경될 수 있습니다. F12 개발자 도구로 정확한 클래스명을 확인해야 합니다. */
+/* 현재 가장 일반적으로 사용되는 헤더 셀렉터 중 하나입니다. */
+div[data-testid="stDataFrame"] .st-emotion-cache-16ffz97 { /* 통합 테이블 헤더 셀 */
+    white-space: pre-wrap !important; /* '\n' 문자를 줄바꿈으로 인식하고 텍스트를 줄바꿈 */
+    word-wrap: break-word !important; /* 긴 단어도 강제 줄바꿈 */
     text-align: center; /* 텍스트 가운데 정렬 */
     vertical-align: middle; /* 세로 가운데 정렬 */
-    padding: 5px; /* 패딩 조정 */
-}
-/* 각 공고별 사정율 테이블 헤더 셀 스타일 (필요시) */
-.stDataFrame .st-emotion-cache-f1g0i0.e1gz00974 { /* 이 셀렉터도 Streamlit 버전에 따라 변경될 수 있음 */
-    white-space: normal !important;
-    word-wrap: break-word !important;
-    text-align: center;
-    vertical-align: middle;
-    padding: 5px;
+    font-size: 11px; /* 글자 크기 조정 */
+    line-height: 1.3; /* 줄 간격 조정 */
+    padding: 4px 8px; /* 패딩 조정 */
 }
 
-/* 일반적인 Streamlit 컬럼 헤더 스타일 (안전한 셀렉터) */
-.stDataFrame > div > div > div > div > div > div:nth-child(2) > div > div:nth-child(1) > div > div {
-    white-space: normal !important;
-    word-wrap: break-word !important;
-    text-align: center;
-    vertical-align: middle;
-    padding: 5px;
-}
-
-/* Rate 컬럼 헤더만 좌측 정렬 유지 (선택 사항) */
-.stDataFrame > div > div > div > div > div > div:nth-child(2) > div > div:nth-child(1) > div:nth-child(1) > div {
+/* Rate 컬럼 헤더는 좌측 정렬 유지 및 글자 크기 조정 */
+div[data-testid="stDataFrame"] .st-emotion-cache-16ffz97:first-child {
     text-align: left !important;
+    font-size: 12px !important; /* Rate 컬럼 헤더의 글자 크기는 조금 더 크게 */
 }
 
+/* 각 공고별 사정율 테이블의 헤더 셀 (개별 테이블에만 적용) */
+/* 이 셀렉터도 정확한 클래스명을 확인해야 합니다. */
+/* 일단 일반적인 셀렉터를 사용하고, 안 되면 개발자 도구로 확인 */
+.stDataFrame > div > div > div > div > div > div:nth-child(2) > div > div > div > div {
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+    text-align: center;
+    vertical-align: middle;
+    font-size: 11px;
+    line-height: 1.3;
+    padding: 4px 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
 display_width = st.selectbox("📏 표 표시 너비 설정", ["자동(전체 너비)", "고정(좁게)"])
-use_wide = display_width == "자동(전체 너비)" # 오류 수정: 닫는 괄호 제거
+use_wide = display_width == "자동(전체 너비)" 
 
 st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
 gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", height=200)
@@ -276,11 +277,11 @@ if st.button("분석 시작") and gongo_nums_input:
                 for gongo_num_col in gongo_nums:
                     top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
                     
-                    # label은 마크다운 형식으로 변경
-                    # CSS를 통해 줄바꿈을 강제하므로 \n은 필요 없음
-                    header_text = f"**{gongo_num_col}**<br>" # 공고번호는 항상 표시
+                    # label은 마크다운 형식으로 변경. <br> 태그 대신 \n을 사용합니다.
+                    # CSS의 white-space: pre-wrap; 이 \n을 인식하여 줄바꿈합니다.
+                    header_text = f"**{gongo_num_col}**\n" # 공고번호는 항상 표시
                     if top_info["name"] != "개찰 결과 없음":
-                        header_text += f"*{top_info['name']}*<br>(사정율: {top_info['rate']:.5f}%)"
+                        header_text += f"*{top_info['name']}*\n(사정율: {top_info['rate']:.5f}%)"
                     else:
                         header_text += "개찰 결과 없음"
                     
