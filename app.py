@@ -12,7 +12,7 @@ st.title("🏗️ 1365 사정율 분석 도구")
 st.markdown("공고번호를 입력하면 복수예가 조합, 낙찰하한율, 개찰결과를 분석해 드립니다.")
 
 display_width = st.selectbox("📏 표 표시 너비 설정", ["자동(전체 너비)", "고정(좁게)"])
-use_wide = display_width == "자동(전체 너비)")
+use_wide = display_width == "자동(전체 너비)"
 
 st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
 gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", height=200)
