@@ -6,6 +6,7 @@ import itertools
 import json
 import xmltodict
 from datetime import datetime
+import re # 정규표현식 모듈 import
 
 st.set_page_config(layout="wide")
 st.title("🏗️ 1365 사정율 분석 도구")
@@ -220,37 +221,47 @@ if st.button("분석 시작") and gongo_nums_input:
                 top_bidder = result_data["top_bidder"]
                 
                 df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
+                # 컬럼명을 공고번호로 설정
                 df_for_merge.rename(columns={'강조_업체명': f'{gongo_num}'}, inplace=True) 
                 
                 merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
                 
+                # top_bidder_info_for_header 딕셔너리에 공고번호를 키로 1순위 정보 저장
                 top_bidder_info_for_header[gongo_num] = top_bidder 
 
             if not merged_df.empty:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
-                # --- 1순위 업체 및 사정율을 테이블 바로 위에 별도로 표시 ---
-                # 첫 컬럼 (Rate)을 위한 공간 + 각 공고번호 컬럼을 위한 공간
-                # Streamlit의 베타 기능인 st.metrics는 전체화면에서 보일 가능성이 높습니다.
-                header_columns = st.columns([1] + [1] * len(gongo_nums))
-
-                with header_columns[0]:
-                    st.empty() # Rate 컬럼 위에는 아무것도 표시하지 않음
+                # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 및 글자 크기 조정 ---
+                column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
                 
-                for idx, gongo_num_str in enumerate(gongo_nums):
-                    col_key = gongo_num_str 
-                    with header_columns[idx + 1]: # 첫 번째 컬럼은 Rate이므로 +1
-                        top_info = top_bidder_info_for_header.get(col_key, {"name": "정보 없음", "rate": "N/A"})
-                        
-                        if top_info["name"] != "개찰 결과 없음":
-                            st.metric(label=f"**{top_info['name']}**", value=f"{top_info['rate']:.5f}%")
-                        else:
-                            st.metric(label="개찰 결과 없음", value="N/A")
-
+                for gongo_num_col in gongo_nums:
+                    top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
+                    
+                    # HTML과 CSS를 사용하여 글자 크기 조절 및 줄 바꿈
+                    header_html = f"<div style='text-align: center; font-size: 11px; line-height: 1.2;'><b>{gongo_num_col}</b><br>"
+                    if top_info["name"] != "개찰 결과 없음":
+                        # 업체명과 사정율은 더 작은 글씨로
+                        header_html += f"<span style='font-size: 10px;'><b>{top_info['name']}</b><br>(사정율: <b>{top_info['rate']:.5f}%</b>)</span>"
+                    else:
+                        header_html += "<span style='font-size: 10px;'>개찰 결과 없음</span>"
+                    header_html += "</div>"
+                    
+                    column_config_dict[gongo_num_col] = st.column_config.TextColumn(
+                        label=header_html, # 여기에 HTML을 직접 전달
+                        width="small" # 필요에 따라 'small', 'medium', 'large' 또는 픽셀 단위로 조절
+                    )
+                
                 # Styler 함수 (통합 테이블용) - 현재 처리 중인 컬럼의 1순위 업체명만 강조
                 def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
-                    current_gongo_num = s.name 
-                    top_info = top_bidder_info_map.get(current_gongo_num)
+                    # s.name은 컬럼 헤더 문자열 (예: 'R25BK00862885')
+                    # top_bidder_info_map에서 해당 컬럼의 원본 공고번호를 찾아야 함
+                    
+                    # column_config에서 설정한 label은 실제 df.columns에 영향을 주지 않으므로
+                    # s.name은 여전히 원본 공고번호 문자열입니다.
+                    current_gongo_num_raw = s.name 
+
+                    top_info = top_bidder_info_map.get(current_gongo_num_raw) 
 
                     if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음":
                         top_bidder_name_raw = top_info['name']
@@ -268,7 +279,8 @@ if st.button("분석 시작") and gongo_nums_input:
                     styled_final_merged_df,
                     use_container_width=True,
                     hide_index=True,
-                    height=min(35 * len(final_merged_df) + 38, 600)
+                    height=min(35 * len(final_merged_df) + 38, 600),
+                    column_config=column_config_dict # 생성한 column_config 적용
                 )
             else:
                 st.info("분석할 유효한 공고번호가 없거나 데이터 병합에 실패했습니다.")
