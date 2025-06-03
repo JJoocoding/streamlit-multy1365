@@ -121,7 +121,7 @@ def analyze_gongo(gongo_nm):
         
         df_combined_gongo['공고번호'] = gongo_nm 
 
-        # ▶ 강조 컬럼: 이제 텍스트 강조 기호는 사용하지 않습니다. 순수한 업체명만 저장합니다.
+        # 강조 컬럼: 이제 텍스트 강조 기호는 사용하지 않습니다. 순수한 업체명만 저장합니다.
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'] # Styler로만 색상 강조
 
         return df_combined_gongo, None, top_bidder_info 
@@ -220,61 +220,77 @@ if st.button("분석 시작") and gongo_nums_input:
                 top_bidder = result_data["top_bidder"]
                 
                 df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
-                df_for_merge.rename(columns={'강조_업체명': f'공고번호 {gongo_num}'}, inplace=True)
+                df_for_merge.rename(columns={'강조_업체명': f'{gongo_num}'}, inplace=True) # 컬럼명을 공고번호만으로 변경
                 
                 merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
                 
-                top_bidder_info_for_header[f'공고번호 {gongo_num}'] = top_bidder
+                top_bidder_info_for_header[gongo_num] = top_bidder # 공고번호만 키로 사용
 
             if not merged_df.empty:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
+                # 컬럼 헤더 (1순위 업체 정보) 표시
+                # Rate 컬럼 + 각 공고번호 컬럼 수만큼 할당
                 header_cols_widths = [1] + [1] * len(gongo_nums)
                 header_cols = st.columns(header_cols_widths)
                 
+                # Rate 컬럼 헤더
                 with header_cols[0]:
                     st.markdown("<div style='text-align: center; font-weight: bold;'>Rate</div>", unsafe_allow_html=True) 
                 
+                # 각 공고번호 컬럼 헤더 및 1순위 정보 표시
                 for idx, gongo_num_str in enumerate(gongo_nums):
-                    col_key = f'공고번호 {gongo_num_str}'
+                    col_key = gongo_num_str # 실제 공고번호를 키로 사용
                     with header_cols[idx + 1]: 
                         top_info = top_bidder_info_for_header.get(col_key, {"name": "정보 없음", "rate": "N/A"})
                         
-                        # 1순위 업체명과 사정율을 함께 표시 (개선)
+                        # 1순위 업체명과 사정율을 공고번호 위에 표시 (HTML을 사용하여 줄 바꿈 및 정렬)
                         if top_info["name"] != "개찰 결과 없음":
                             st.markdown(
-                                f"<div style='text-align: center; font-size: 14px;'>"
+                                f"<div style='text-align: center; font-size: 14px; line-height: 1.2;'>"
                                 f"**{top_info['name']}**<br>"
-                                f"(사정율: **{top_info['rate']:.5f}%**)<br>" # 사정율 소수점 5자리까지 표시
-                                f"**{gongo_num_str}**" # 공고번호는 따로 bold로 표시
+                                f"(사정율: **{top_info['rate']:.5f}%**)"
                                 f"</div>",
                                 unsafe_allow_html=True
                             )
                         else:
                             st.markdown(
-                                f"<div style='text-align: center; font-size: 14px;'>"
-                                f"개찰 결과 없음<br>"
-                                f"**{gongo_num_str}**"
+                                f"<div style='text-align: center; font-size: 14px; line-height: 1.2;'>"
+                                f"개찰 결과 없음"
                                 f"</div>", 
                                 unsafe_allow_html=True
                             )
-                
-                # Styler 함수 (통합 테이블용) - 순수한 업체명 비교
-                def highlight_top_bidder_in_merged_table(val, top_bidder_name_raw):
-                    if pd.notna(val) and isinstance(val, str):
-                        # '강조_업체명'에는 이제 순수한 업체명만 저장되므로, val과 top_bidder_name_raw를 직접 비교
-                        if val == top_bidder_name_raw:
-                            return 'background-color: yellow'
-                    return ''
+                        # 공고번호는 DataFrame 헤더로 직접 표시되므로 여기서는 생략하거나, 
+                        # 꼭 필요하다면 st.markdown으로 한번 더 강조할 수 있지만, 
+                        # 현재 목표는 '표 안에 공고번호 아래에 표시되길 바래'가 아니므로, 
+                        # 이는 DataFrame 자체의 컬럼명으로 활용하는 것이 맞습니다.
 
-                styled_final_merged_df = final_merged_df.style
-                for col_name, top_info in top_bidder_info_for_header.items():
-                    top_bidder_name_raw = top_info['name'] # 강조 이모지가 없는 순수 업체명
-                    if top_bidder_name_raw != "정보 없음" and top_bidder_name_raw != "개찰 결과 없음":
-                        styled_final_merged_df = styled_final_merged_df.applymap(
-                            lambda x: highlight_top_bidder_in_merged_table(x, top_bidder_name_raw),
-                            subset=[col_name]
-                        )
+                # Styler 함수 (통합 테이블용) - 현재 처리 중인 컬럼의 1순위 업체명만 강조
+                def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
+                    # s는 Series (한 컬럼의 모든 값), top_bidder_info_map은 {공고번호: {name: '1순위 업체명', rate: '사정율'}} 딕셔너리
+                    
+                    # 현재 컬럼의 공고번호를 추출
+                    current_gongo_num = s.name 
+                    
+                    # 해당 공고의 1순위 업체 정보
+                    top_info = top_bidder_info_map.get(current_gongo_num)
+
+                    if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음":
+                        top_bidder_name_raw = top_info['name']
+                        # Series의 각 값에 대해 스타일 적용
+                        return ['background-color: yellow' if pd.notna(val) and val == top_bidder_name_raw else '' for val in s]
+                    return [''] * len(s) # 해당 공고에 1순위 정보가 없으면 빈 스타일 리스트 반환
+
+                # 'rate' 컬럼은 스타일링에서 제외
+                columns_to_style = [col for col in final_merged_df.columns if col != 'rate']
+
+                # Styler를 적용하여 DataFrame 표시
+                # apply는 컬럼 단위로 함수를 적용하므로, highlight_top_bidder_in_merged_table에 
+                # top_bidder_info_for_header 맵을 전달하여 각 컬럼의 1순위 업체를 알 수 있도록 함
+                styled_final_merged_df = final_merged_df.style.apply(
+                    lambda s: highlight_top_bidder_in_merged_table(s, top_bidder_info_for_header), 
+                    subset=columns_to_style
+                )
                 
                 st.dataframe(
                     styled_final_merged_df,
@@ -293,7 +309,6 @@ if st.button("분석 시작") and gongo_nums_input:
             
             all_results_df_for_download = pd.concat([res["df"] for res in results_by_gongo], ignore_index=True)
             download_df = all_results_df_for_download.copy()
-            # 이제 강조_업체명에 불필요한 마크다운이 없으므로, 단순히 업체명 컬럼으로 복사
             download_df['업체명'] = download_df['강조_업체명'] 
             download_df = download_df[['공고번호', 'rate', '업체명']] 
             download_df.to_excel(filename, index=False)
