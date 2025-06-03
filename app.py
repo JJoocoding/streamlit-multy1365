@@ -29,8 +29,6 @@ def analyze_gongo(gongo_nm):
     top_bidder_info = {"name": "정보 없음", "rate": "N/A"} # 1순위 업체 정보 초기화
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # 보안을 위해 Secrets 사용 권장
-        # service_key = 'NXIL0ccBuaYTU1TvOY7wEfHJzR%2FqBRUCwoIIWHdw%2Bcfy3qy8tVEHktbZ5o95y8XqdW4GrQaj%2FSawwFq7gmkhfA%3D%3D'
         service_key = st.secrets["SERVICE_KEY"] 
 
 
@@ -132,19 +130,24 @@ def analyze_gongo(gongo_nm):
             df4.rename(columns={'업체명': '업체명'})
         ], ignore_index=True).sort_values('rate').reset_index(drop=True)
         df_combined_gongo['rate'] = round(df_combined_gongo['rate'], 5)
+        
+        # <<< 변경 사항: 여기에 '공고번호' 컬럼 추가 >>>
+        df_combined_gongo['공고번호'] = gongo_nm 
 
         # ▶ 강조 컬럼 추가: 1순위 업체명과 일치하면 강조 (더 눈에 띄게)
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'].apply(
             lambda x: f"✨ **{x}**" if x == top_bidder_info['name'] else x
         )
         
-        # '공고번호' 컬럼은 이제 개별 출력에서는 필요 없으므로 제거하지 않고, 나중에 표시할 때 제외
-        return df_combined_gongo, None, top_bidder_info # 성공 시 데이터프레임, None, 1순위 정보 반환
+        return df_combined_gongo, None, top_bidder_info 
 
     except ValueError as ve:
         return pd.DataFrame(), f"⚠️ 경고: 공고번호 {gongo_nm} - {ve}", top_bidder_info
     except Exception as e:
         return pd.DataFrame(), f"❌ 오류 발생: 공고번호 {gongo_nm} - {e}", top_bidder_info
+
+
+
 
 if st.button("분석 시작") and gongo_nums_input:
     gongo_nums = [gn.strip() for gn in gongo_nums_input.split('\n') if gn.strip()]
