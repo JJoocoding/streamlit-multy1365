@@ -7,6 +7,7 @@ import json
 import xmltodict
 from datetime import datetime
 import re
+import io # io 모듈 추가
 
 st.set_page_config(layout="wide")
 st.title("🏗️ 1365 사정율 분석 도구")
@@ -161,7 +162,7 @@ def analyze_gongo(gongo_nm):
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'] # Styler로만 색상 강조
         
         # None 값을 빈 문자열로 대체 (개별 공고 테이블용)
-        df_combined_gongo = df_combined_gongo.fillna('') # 추가된 부분
+        df_combined_gongo = df_combined_gongo.fillna('') 
 
         return df_combined_gongo, None, top_bidder_info 
 
@@ -276,7 +277,7 @@ if st.button("분석 시작") and gongo_nums_input:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
                 # None 값을 빈 문자열로 대체 (통합 테이블용)
-                final_merged_df = final_merged_df.fillna('') # 추가된 부분
+                final_merged_df = final_merged_df.fillna('') 
 
                 # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 ---
                 column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
@@ -333,18 +334,32 @@ if st.button("분석 시작") and gongo_nums_input:
                 st.info("분석할 유효한 공고번호가 없거나 데이터 병합에 실패했습니다.")
 
 
-            # --- 전체 결과 다운로드 (기존 유지) ---
+            # --- 전체 결과 다운로드 (수정된 부분) ---
             st.subheader("📥 전체 결과 다운로드")
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"통합_사정율분석_{now}.xlsx"
             
-            all_results_df_for_download = pd.concat([res["df"] for res in results_by_gongo], ignore_index=True)
-            download_df = all_results_df_for_download.copy()
-            download_df['업체명'] = download_df['강조_업체명'] 
-            download_df = download_df[['공고번호', 'rate', '업체명']] 
-            download_df.to_excel(filename, index=False)
-            with open(filename, "rb") as f:
-                st.download_button("엑셀 다운로드", f, file_name=filename)
+            # 여기서 다운로드할 DataFrame을 final_merged_df (Styler 객체)로 변경
+            # Styler.to_excel()을 사용하며, engine='openpyxl' 명시
+            
+            if not final_merged_df.empty: # final_merged_df가 생성된 경우에만 다운로드 버튼 표시
+                excel_buffer = io.BytesIO()
+                
+                # Styler 객체를 직접 엑셀로 저장 시도
+                # xlsxwriter 엔진은 더 많은 스타일을 지원하지만, openpyxl이 기본이며 Streamlit에서 호환성이 좋을 수 있습니다.
+                # 여기서는 openpyxl을 사용하며, 워크북 객체와 워크시트 객체를 직접 다루지 않고 Styler의 기능을 활용합니다.
+                # 주의: 모든 CSS 스타일이 엑셀 서식으로 완벽하게 변환되지는 않습니다.
+                styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
+                
+                excel_buffer.seek(0)
+                st.download_button(
+                    label="통합 결과 엑셀 다운로드",
+                    data=excel_buffer,
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.info("다운로드할 통합 결과 데이터가 없습니다.")
 
         else:
             st.warning("분석할 유효한 공고번호가 없거나 모든 공고번호에서 오류가 발생했습니다.")
