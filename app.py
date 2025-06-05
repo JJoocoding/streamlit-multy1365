@@ -219,12 +219,16 @@ if st.button("분석 시작") and gongo_nums_input:
                         else:
                             st.markdown(f"**공고번호 {gongo_num}**: 개찰 결과 정보 없음")
                         
-                        # 각 공고별 테이블 강조 함수 (텍스트 강조 기호 제거 반영)
+                        # --- 수정된 highlight_top_bidder_individual 함수 ---
                         def highlight_top_bidder_individual(row, top_bidder_name):
-                            color = 'background-color: yellow'
+                            styles = [''] * len(row)
+                            # 1순위 업체 (빨간색)
                             if pd.notna(row['강조_업체명']) and row['강조_업체명'] == top_bidder_name:
-                                return [color] * len(row)
-                            return [''] * len(row)
+                                styles = ['background-color: #ffcccc'] * len(row) # 연한 빨간색
+                            # 대명포장중기 (노란색) - 1순위 업체가 아닌 경우에만 적용
+                            elif pd.notna(row['강조_업체명']) and "대명포장중기" in row['강조_업체명']:
+                                styles = ['background-color: #ffffcc'] * len(row) # 연한 노란색
+                            return styles
 
                         # '강조_업체명'에는 이제 순수 업체명이 들어가므로 top_bidder['name']과 직접 비교
                         display_df_styled = df[['rate', '강조_업체명']].style.apply(
@@ -286,16 +290,24 @@ if st.button("분석 시작") and gongo_nums_input:
                         width="small" # 필요에 따라 'small', 'medium', 'large' 또는 픽셀 단위로 조절
                     )
                 
-                # Styler 함수 (통합 테이블용) - 현재 처리 중인 컬럼의 1순위 업체명만 강조
+                # --- 수정된 highlight_top_bidder_in_merged_table 함수 ---
                 def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
                     current_gongo_num_raw = s.name 
-
                     top_info = top_bidder_info_map.get(current_gongo_num_raw) 
-
-                    if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음":
-                        top_bidder_name_raw = top_info['name']
-                        return ['background-color: yellow' if pd.notna(val) and val == top_bidder_name_raw else '' for val in s]
-                    return [''] * len(s) 
+                    
+                    styles = []
+                    for val in s:
+                        style = ''
+                        # 1순위 업체 (빨간색)
+                        if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and \
+                           pd.notna(val) and val == top_info['name']:
+                            style = 'background-color: #ffcccc' # 연한 빨간색
+                        # 대명포장중기 (노란색) - 1순위 업체가 아닌 경우에만 적용 (빨간색 우선)
+                        elif pd.notna(val) and "대명포장중기" in val and \
+                             not (top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and val == top_info['name']):
+                            style = 'background-color: #ffffcc' # 연한 노란색
+                        styles.append(style)
+                    return styles 
 
                 columns_to_style = [col for col in final_merged_df.columns if col != 'rate']
 
