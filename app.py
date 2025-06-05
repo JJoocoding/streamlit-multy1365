@@ -7,7 +7,7 @@ import json
 import xmltodict
 from datetime import datetime
 import re
-import io # io 모듈 추가
+import io 
 
 st.set_page_config(layout="wide")
 st.title("🏗️ 1365 사정율 분석 도구")
@@ -223,7 +223,7 @@ if st.button("분석 시작") and gongo_nums_input:
                         else:
                             st.markdown(f"**공고번호 {gongo_num}**: 개찰 결과 정보 없음")
                         
-                        # --- 수정된 highlight_top_bidder_individual 함수 ---
+                        # --- highlight_top_bidder_individual 함수 ---
                         def highlight_top_bidder_individual(row, top_bidder_name):
                             styles = [''] * len(row)
                             # 1순위 업체 (빨간색)
@@ -259,19 +259,30 @@ if st.button("분석 시작") and gongo_nums_input:
                 base_rates_df = pd.DataFrame({'rate': all_rates}).sort_values('rate').reset_index(drop=True)
                 merged_df = base_rates_df
             
-            for i, result_data in enumerate(results_by_gongo):
-                gongo_num = result_data["gongo_num"]
-                df_current_gongo = result_data["df"].copy()
-                top_bidder = result_data["top_bidder"]
+            # 여기서 gongo_nums의 순서를 역순으로 변경하여 컬럼 순서를 조정
+            # original_gongo_nums = [res["gongo_num"] for res in results_by_gongo] # 원래 순서
+            
+            # 결과를 합칠 때, 맨 마지막에 입력된 공고번호부터 컬럼이 오도록 순서를 뒤집음
+            # results_by_gongo 리스트 자체를 뒤집는 대신, for 루프에서 역순으로 처리
+            # 또는 merged_df에 컬럼을 추가할 때 순서를 역순으로 처리
+            
+            # 최종 컬럼 순서를 위한 리스트 (rate, 그리고 뒤집힌 공고번호 순서)
+            ordered_gongo_nums = gongo_nums[::-1] # 입력된 공고번호 리스트를 뒤집음
+            
+            for gongo_num_to_process in ordered_gongo_nums:
+                # results_by_gongo에서 해당 공고번호의 데이터를 찾음
+                current_result_data = next((res for res in results_by_gongo if res['gongo_num'] == gongo_num_to_process), None)
                 
-                df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
-                # 컬럼명을 공고번호로 설정 (실제 DataFrame 컬럼명)
-                df_for_merge.rename(columns={'강조_업체명': f'{gongo_num}'}, inplace=True) 
-                
-                merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
-                
-                # top_bidder_info_for_header 딕셔너리에 공고번호를 키로 1순위 정보 저장
-                top_bidder_info_for_header[gongo_num] = top_bidder 
+                if current_result_data:
+                    df_current_gongo = current_result_data["df"].copy()
+                    top_bidder = current_result_data["top_bidder"]
+                    
+                    df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
+                    df_for_merge.rename(columns={'강조_업체명': f'{gongo_num_to_process}'}, inplace=True) 
+                    
+                    merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
+                    
+                    top_bidder_info_for_header[gongo_num_to_process] = top_bidder 
 
             if not merged_df.empty:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
@@ -279,25 +290,30 @@ if st.button("분석 시작") and gongo_nums_input:
                 # None 값을 빈 문자열로 대체 (통합 테이블용)
                 final_merged_df = final_merged_df.fillna('') 
 
+                # 컬럼 순서를 'rate' 다음에 역순으로 정렬된 공고번호가 오도록 재조정
+                # 이렇게 하면 Streamlit DataFrame과 Excel 다운로드에서 모두 순서가 맞춰짐
+                columns_order = ['rate'] + ordered_gongo_nums
+                final_merged_df = final_merged_df[columns_order]
+
                 # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 ---
                 column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
 
-                for gongo_num_col in gongo_nums:
+                # 컬럼 헤더 설정도 재조정된 순서에 맞춰서 진행
+                for gongo_num_col in ordered_gongo_nums: # 뒤집힌 순서 사용
                     top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
                     
-                    # label에 업체명과 "사정율" 글씨 제외하고 공고번호와 낙찰율 숫자만 표시
-                    header_text = f"{gongo_num_col}\n" # 공고번호는 항상 표시
+                    header_text = f"{gongo_num_col}\n" 
                     if top_info["name"] != "개찰 결과 없음" and top_info["rate"] != "N/A":
                         header_text += f"{top_info['rate']:.5f}%"
                     else:
-                        header_text += "정보 없음" # 1순위 정보가 없거나 N/A일 경우
+                        header_text += "정보 없음" 
                     
                     column_config_dict[gongo_num_col] = st.column_config.TextColumn(
                         label=header_text, 
-                        width="small" # 필요에 따라 'small', 'medium', 'large' 또는 픽셀 단위로 조절
+                        width="small" 
                     )
                 
-                # --- 수정된 highlight_top_bidder_in_merged_table 함수 ---
+                # --- highlight_top_bidder_in_merged_table 함수 ---
                 def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
                     current_gongo_num_raw = s.name 
                     top_info = top_bidder_info_map.get(current_gongo_num_raw) 
@@ -334,21 +350,15 @@ if st.button("분석 시작") and gongo_nums_input:
                 st.info("분석할 유효한 공고번호가 없거나 데이터 병합에 실패했습니다.")
 
 
-            # --- 전체 결과 다운로드 (수정된 부분) ---
+            # --- 전체 결과 다운로드 ---
             st.subheader("📥 전체 결과 다운로드")
             now = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"통합_사정율분석_{now}.xlsx"
             
-            # 여기서 다운로드할 DataFrame을 final_merged_df (Styler 객체)로 변경
-            # Styler.to_excel()을 사용하며, engine='openpyxl' 명시
-            
-            if not final_merged_df.empty: # final_merged_df가 생성된 경우에만 다운로드 버튼 표시
+            if not final_merged_df.empty: 
                 excel_buffer = io.BytesIO()
                 
-                # Styler 객체를 직접 엑셀로 저장 시도
-                # xlsxwriter 엔진은 더 많은 스타일을 지원하지만, openpyxl이 기본이며 Streamlit에서 호환성이 좋을 수 있습니다.
-                # 여기서는 openpyxl을 사용하며, 워크북 객체와 워크시트 객체를 직접 다루지 않고 Styler의 기능을 활용합니다.
-                # 주의: 모든 CSS 스타일이 엑셀 서식으로 완벽하게 변환되지는 않습니다.
+                # Styler 객체를 직접 엑셀로 저장
                 styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
                 
                 excel_buffer.seek(0)
