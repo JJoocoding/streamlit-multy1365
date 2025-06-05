@@ -159,6 +159,9 @@ def analyze_gongo(gongo_nm):
 
         # 강조 컬럼: 이제 텍스트 강조 기호는 사용하지 않습니다. 순수한 업체명만 저장합니다.
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'] # Styler로만 색상 강조
+        
+        # None 값을 빈 문자열로 대체 (개별 공고 테이블용)
+        df_combined_gongo = df_combined_gongo.fillna('') # 추가된 부분
 
         return df_combined_gongo, None, top_bidder_info 
 
@@ -272,6 +275,9 @@ if st.button("분석 시작") and gongo_nums_input:
             if not merged_df.empty:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
+                # None 값을 빈 문자열로 대체 (통합 테이블용)
+                final_merged_df = final_merged_df.fillna('') # 추가된 부분
+
                 # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 ---
                 column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
 
