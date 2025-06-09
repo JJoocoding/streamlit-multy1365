@@ -86,12 +86,31 @@ def analyze_gongo(gongo_nm):
         data1 = json.loads(res1.text)
         if 'response' not in data1 or 'body' not in data1['response'] or 'items' not in data1['response']['body'] or not data1['response']['body']['items']:
             raise ValueError(f"복수예가 데이터 없음")
-        df1 = pd.json_normalize(data1['response']['body']['items'])
-        df1 = df1[['bssamt', 'bsisPlnprc']].astype('float')
+        
+        # 복수예가 데이터를 DataFrame으로 변환. 'item'이 리스트가 아닐 경우 처리
+        items_df1 = data1['response']['body']['items']['item']
+        if not isinstance(items_df1, list):
+            items_df1 = [items_df1]
+        df1 = pd.json_normalize(items_df1)
+        
+        # 'plnprcSeCd' (예정가격구분코드)를 사용하여 기초금액 찾기
+        # '1'이 예정가격(기초금액)을 나타낸다고 가정
+        base_price_rows = df1[df1['plnprcSeCd'] == '1']
+        if not base_price_rows.empty:
+            base_price = float(base_price_rows.iloc[0]['bssamt'])
+        else:
+            # 'plnprcSeCd'가 '1'인 데이터가 없으면, 기존 로직처럼 첫 번째 bssamt를 예정가격으로 간주 (최후의 보루)
+            # 또는 오류를 발생시켜 사용자에게 알림
+            if 'bssamt' in df1.columns and not df1.empty:
+                base_price = float(df1.iloc[0]['bssamt'])
+                st.warning(f"공고번호 {gongo_nm}: 'plnprcSeCd' 1인 기초금액을 찾을 수 없습니다. 첫 번째 예정가격을 기초금액으로 사용합니다.")
+            else:
+                raise ValueError("복수예가 데이터에서 유효한 기초금액을 찾을 수 없습니다.")
+
+        df1['bssamt'] = pd.to_numeric(df1['bssamt'], errors='coerce')
+        df1['bsisPlnprc'] = pd.to_numeric(df1['bsisPlnprc'], errors='coerce')
         df1['SA_rate'] = df1['bsisPlnprc'] / df1['bssamt'] * 100
         
-        # ### 중요 수정: base_price를 항상 첫 번째 행의 'bssamt'로 설정
-        base_price = df1.iloc[0]['bssamt'] 
         st.write(f"--- {gongo_nm} - 추출된 base_price: {base_price} ---") # 디버깅용
         
         # ▶ 조합 평균 계산
