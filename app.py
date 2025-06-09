@@ -69,14 +69,17 @@ def analyze_gongo(gongo_nm):
     top_bidder_info = {"name": "정보 없음", "rate": "N/A"}
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # st.secrets는 앱이 로드될 때 한 번만 호출되는 것이 안정적
-        service_key = st.secrets.get("SERVICE_KEY", None) # 기본값을 None으로 변경하여 명시적인 에러 메시지 유도
+        service_key = st.secrets.get("SERVICE_KEY", None)
         if service_key is None or not service_key.strip():
             raise Exception("Streamlit Secrets에 'SERVICE_KEY'가 설정되지 않았거나 비어 있습니다.")
 
         # ▶ 복수예가 상세
         url1 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoCnstwkPreparPcDetail?inqryDiv=2&bidNtceNo={gongo_nm}&bidNtceOrd=00&pageNo=1&numOfRows=15&type=json&ServiceKey={service_key}'
         res1 = requests.get(url1, headers=headers)
+        # --- 디버깅용: API 응답 출력 ---
+        st.write(f"--- {gongo_nm} 복수예가 API 응답 (url1) ---")
+        st.code(res1.text)
+        # ---------------------------------
         if res1.status_code != 200:
             raise Exception(f"API 호출 실패 (복수예가): HTTP {res1.status_code}")
         data1 = json.loads(res1.text)
@@ -98,6 +101,10 @@ def analyze_gongo(gongo_nm):
         # ▶ 낙찰하한율 조회
         url2 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
         res2 = requests.get(url2, headers=headers)
+        # --- 디버깅용: API 응답 출력 ---
+        st.write(f"--- {gongo_nm} 낙찰하한율 API 응답 (url2) ---")
+        st.code(res2.text)
+        # ---------------------------------
         if res2.status_code != 200:
             raise Exception(f"API 호출 실패 (낙찰하한율): HTTP {res2.status_code}")
         data2 = json.loads(res2.text)
@@ -109,22 +116,36 @@ def analyze_gongo(gongo_nm):
         # ▶ A값 계산
         url3 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkBsisAmount?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
         res3 = requests.get(url3, headers=headers)
+        # --- 디버깅용: API 응답 출력 ---
+        st.write(f"--- {gongo_nm} A값 API 응답 (url3) ---")
+        st.code(res3.text)
+        # ---------------------------------
         if res3.status_code != 200:
             raise Exception(f"API 호출 실패 (A값): HTTP {res3.status_code}")
         data3 = json.loads(res3.text)
-        if 'response' not in data3 or 'body' not in data3['response'] or 'items' not in data3['response']['body'] or 'item' not in data3['response']['body']['items']:
-             raise ValueError(f"A값 데이터 없음")
-        df3 = pd.json_normalize(data3['response']['body']['items']['item'])
-        cost_cols = ['sftyMngcst','sftyChckMngcst','rtrfundNon','mrfnHealthInsrprm','npnInsrprm','odsnLngtrmrcprInsrprm','qltyMngcst']
-        valid_cost_cols = [col for col in cost_cols if col in df3.columns]
-        if not valid_cost_cols:
-            A_value = 0
-        else:
-            A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1).iloc[0]
+
+        # A값 데이터를 더 유연하게 처리 (이전 수정사항 유지)
+        A_value = 0 
+        if 'response' in data3 and 'body' in data3['response'] and 'items' in data3['response']['body'] and 'item' in data3['response']['body']['items']:
+            items_a_value = data3['response']['body']['items']['item']
+            if not isinstance(items_a_value, list): 
+                items_a_value = [items_a_value]
+            df3 = pd.DataFrame(items_a_value)
+            
+            cost_cols = ['sftyMngcst','sftyChckMngcst','rtrfundNon','mrfnHealthInsrprm','npnInsrprm','odsnLngtrmrcprInsrprm','qltyMngcst']
+            valid_cost_cols = [col for col in cost_cols if col in df3.columns]
+            
+            if valid_cost_cols: 
+                A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1).iloc[0]
+        
 
         # ▶ 개찰결과 (여기서 맨 첫 번째 업체가 1순위)
         url4 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoOpengCompt?serviceKey={service_key}&pageNo=1&numOfRows=999&bidNtceNo={gongo_nm}'
         res4 = requests.get(url4, headers=headers)
+        # --- 디버깅용: API 응답 출력 ---
+        st.write(f"--- {gongo_nm} 개찰결과 API 응답 (url4) ---")
+        st.code(res4.text)
+        # ---------------------------------
         if res4.status_code != 200:
             raise Exception(f"API 호출 실패 (개찰결과): HTTP {res4.status_code}")
         data4 = json.loads(json.dumps(xmltodict.parse(res4.text)))
@@ -185,7 +206,6 @@ def analyze_gongo(gongo_nm):
 st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
 
 # --- "처음으로" 버튼 로직 (UI 상단으로 이동하여 항상 보이게) ---
-# analysis_completed 상태와 관계없이 항상 보이는 "처음으로" 버튼
 def reset_app():
     # 모든 관련 세션 상태 초기화
     st.session_state.gongo_nums_input_value = "" 
@@ -193,17 +213,13 @@ def reset_app():
     st.session_state.results_by_gongo_data = []
     st.session_state.errors_data = []
     st.session_state.processed_gongo_nums = [] 
-    st.cache_data.clear() # 캐시 데이터도 초기화
-
-    # st.rerun()을 콜백에서 직접 호출하지 않습니다.
-    # 대신, 변경된 session_state가 다음 Streamlit 실행 주기에서 UI를 초기 상태로 렌더링하게 합니다.
+    st.cache_data.clear() # 캐시 데이터도 초기화 -> 이 부분이 중요합니다.
 
 # "처음으로" 버튼은 분석이 완료되었거나, 이미 입력값이 있는 상태라면 표시
 if st.session_state.analysis_completed or st.session_state.gongo_nums_input_value.strip():
     if st.button("🔄 처음으로", on_click=reset_app):
-        pass # 클릭 시 reset_app 함수가 호출되므로 추가적인 동작은 필요 없음
+        pass
 
-# 분석이 완료되지 않았을 때만 입력창과 '분석 시작' 버튼 표시
 if not st.session_state.analysis_completed:
     gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", 
                                     height=200, 
@@ -247,7 +263,7 @@ if not st.session_state.analysis_completed:
             st.session_state.results_by_gongo_data = results_by_gongo 
             st.session_state.errors_data = errors 
             st.session_state.analysis_completed = True 
-            st.rerun() # 분석 시작 버튼 클릭 후에는 rerun을 통해 결과 화면으로 전환
+            st.rerun() 
 else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
     results_by_gongo = st.session_state.results_by_gongo_data
     errors = st.session_state.errors_data
@@ -255,7 +271,6 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
 
     st.markdown("---") 
 
-    # --- 각 공고별 결과 분리 및 가로 배열 (기존 유지) ---
     if results_by_gongo:
         st.subheader("📈 각 공고별 사정율 분석 결과")
         
@@ -270,19 +285,15 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
                     df = result_data["df"]
                     top_bidder = result_data["top_bidder"]
 
-                    # 개별 테이블 상단 정보는 업체명 포함하여 기존처럼 표시
                     if top_bidder["name"] != "개찰 결과 없음":
                         st.markdown(f"**공고번호 {gongo_num}**: **{top_bidder['name']}** (사정율: **{top_bidder['rate']}%**)")
                     else:
                         st.markdown(f"**공고번호 {gongo_num}**: 개찰 결과 정보 없음")
                     
-                    # --- highlight_top_bidder_individual 함수 ---
                     def highlight_top_bidder_individual(row, top_bidder_name):
                         styles = [''] * len(row)
-                        # 1순위 업체 (빨간색)
                         if pd.notna(row['강조_업체명']) and row['강조_업체명'] == top_bidder_name:
                             styles = ['background-color: #ffcccc'] * len(row) 
-                        # 대명포장중기 (노란색) - 1순위 업체가 아닌 경우에만 적용
                         elif pd.notna(row['강조_업체명']) and "대명포장중기" in row['강조_업체명']:
                             styles = ['background-color: #ffffcc'] * len(row) 
                         return styles
@@ -299,7 +310,6 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
                     )
                     st.markdown("---") 
 
-        # --- 통합 사정율 분석 결과 (새로운 형식) 섹션 ---
         st.markdown("---") 
         st.subheader("📊 통합 사정율 분석 결과") 
 
@@ -351,7 +361,6 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
                     width="small" 
                 )
             
-            # --- highlight_top_bidder_in_merged_table 함수 ---
             def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
                 current_gongo_num_raw = s.name 
                 top_info = top_bidder_info_map.get(current_gongo_num_raw) 
@@ -359,11 +368,9 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
                 styles = []
                 for val in s:
                     style = ''
-                    # 1순위 업체 (빨간색)
                     if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and \
                        pd.notna(val) and val == top_info['name']:
                         style = 'background-color: #ffcccc' 
-                    # 대명포장중기 (노란색) - 1순위 업체가 아닌 경우에만 적용 (빨간색 우선)
                     elif pd.notna(val) and "대명포장중기" in val and \
                          not (top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and val == top_info['name']):
                         style = 'background-color: #ffffcc' 
@@ -388,7 +395,6 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
             st.info("분석할 유효한 공고번호가 없거나 데이터 병합에 실패했습니다.")
 
 
-        # --- 전체 결과 다운로드 ---
         st.subheader("📥 전체 결과 다운로드")
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"통합_사정율분석_{now}.xlsx"
