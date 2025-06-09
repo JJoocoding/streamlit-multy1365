@@ -52,7 +52,15 @@ display_width = st.selectbox("📏 표 표시 너비 설정", ["자동(전체 �
 use_wide = display_width == "자동(전체 너비)" 
 
 st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
-gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", height=200)
+
+# session_state에 gongo_nums_input 값을 저장하여, rerun 후에도 값을 유지하고 초기화할 수 있도록 함
+if 'gongo_nums_input_value' not in st.session_state:
+    st.session_state.gongo_nums_input_value = ""
+
+gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", 
+                                height=200, 
+                                value=st.session_state.gongo_nums_input_value, # session_state 값 사용
+                                key="gongo_input_area") # 고유 키 추가
 
 @st.cache_data(ttl=3600)
 def analyze_gongo(gongo_nm):
@@ -171,11 +179,15 @@ def analyze_gongo(gongo_nm):
     except Exception as e:
         return pd.DataFrame(), f"❌ 오류 발생: 공고번호 {gongo_nm} - {e}", top_bidder_info
 
+# "분석 시작" 버튼 클릭 시, 입력된 공고번호를 session_state에 저장
 if st.button("분석 시작") and gongo_nums_input:
+    st.session_state.gongo_nums_input_value = gongo_nums_input # 입력 값 저장
+    
     gongo_nums = [gn.strip() for gn in gongo_nums_input.split('\n') if gn.strip()]
 
     if not (1 <= len(gongo_nums) <= 10):
         st.error("⚠️ 공고번호는 1개에서 10개까지만 입력 가능합니다.")
+        # 에러 발생 시에도 입력값은 유지되도록 st.session_state.gongo_nums_input_value를 사용
     else:
         results_by_gongo = []
         errors = []
@@ -259,18 +271,10 @@ if st.button("분석 시작") and gongo_nums_input:
                 base_rates_df = pd.DataFrame({'rate': all_rates}).sort_values('rate').reset_index(drop=True)
                 merged_df = base_rates_df
             
-            # 여기서 gongo_nums의 순서를 역순으로 변경하여 컬럼 순서를 조정
-            # original_gongo_nums = [res["gongo_num"] for res in results_by_gongo] # 원래 순서
-            
-            # 결과를 합칠 때, 맨 마지막에 입력된 공고번호부터 컬럼이 오도록 순서를 뒤집음
-            # results_by_gongo 리스트 자체를 뒤집는 대신, for 루프에서 역순으로 처리
-            # 또는 merged_df에 컬럼을 추가할 때 순서를 역순으로 처리
-            
-            # 최종 컬럼 순서를 위한 리스트 (rate, 그리고 뒤집힌 공고번호 순서)
+            # 컬럼 순서를 위한 리스트 (rate, 그리고 뒤집힌 공고번호 순서)
             ordered_gongo_nums = gongo_nums[::-1] # 입력된 공고번호 리스트를 뒤집음
             
             for gongo_num_to_process in ordered_gongo_nums:
-                # results_by_gongo에서 해당 공고번호의 데이터를 찾음
                 current_result_data = next((res for res in results_by_gongo if res['gongo_num'] == gongo_num_to_process), None)
                 
                 if current_result_data:
@@ -287,19 +291,14 @@ if st.button("분석 시작") and gongo_nums_input:
             if not merged_df.empty:
                 final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
                 
-                # None 값을 빈 문자열로 대체 (통합 테이블용)
                 final_merged_df = final_merged_df.fillna('') 
 
-                # 컬럼 순서를 'rate' 다음에 역순으로 정렬된 공고번호가 오도록 재조정
-                # 이렇게 하면 Streamlit DataFrame과 Excel 다운로드에서 모두 순서가 맞춰짐
                 columns_order = ['rate'] + ordered_gongo_nums
                 final_merged_df = final_merged_df[columns_order]
 
-                # --- st.dataframe의 column_config를 사용하여 헤더에 1순위 정보 표시 ---
-                column_config_dict = {"rate": "Rate"} # 'rate' 컬럼은 그대로
+                column_config_dict = {"rate": "Rate"} 
 
-                # 컬럼 헤더 설정도 재조정된 순서에 맞춰서 진행
-                for gongo_num_col in ordered_gongo_nums: # 뒤집힌 순서 사용
+                for gongo_num_col in ordered_gongo_nums: 
                     top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
                     
                     header_text = f"{gongo_num_col}\n" 
@@ -358,7 +357,6 @@ if st.button("분석 시작") and gongo_nums_input:
             if not final_merged_df.empty: 
                 excel_buffer = io.BytesIO()
                 
-                # Styler 객체를 직접 엑셀로 저장
                 styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
                 
                 excel_buffer.seek(0)
@@ -370,6 +368,15 @@ if st.button("분석 시작") and gongo_nums_input:
                 )
             else:
                 st.info("다운로드할 통합 결과 데이터가 없습니다.")
+
+            # --- "처음으로" 버튼 추가 ---
+            st.markdown("---")
+            def reset_app():
+                st.session_state.gongo_nums_input_value = "" # 입력창 초기화
+                st.cache_data.clear() # 캐시 데이터도 초기화 (필요시)
+                st.rerun() # 앱 재실행
+
+            st.button("처음으로", on_click=reset_app) # 버튼 클릭 시 reset_app 함수 호출
 
         else:
             st.warning("분석할 유효한 공고번호가 없거나 모든 공고번호에서 오류가 발생했습니다.")
