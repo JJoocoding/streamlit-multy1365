@@ -74,28 +74,29 @@ def analyze_gongo(gongo_nm):
         if service_key is None or not service_key.strip():
             raise Exception("Streamlit Secrets에 'SERVICE_KEY'가 설정되지 않았거나 비어 있습니다.")
 
-        # ▶ 복수예가 상세
+        # ▶ 복수예가 상세 (url1)
         url1 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoCnstwkPreparPcDetail?inqryDiv=2&bidNtceNo={gongo_nm}&bidNtceOrd=00&pageNo=1&numOfRows=15&type=json&ServiceKey={service_key}'
         res1 = requests.get(url1, headers=headers)
         if res1.status_code != 200:
-            raise Exception(f"API 호출 실패 (복수예가): HTTP {res1.status_code}")
+            raise Exception(f"API 호출 실패 (복수예가 - {url1}): HTTP {res1.status_code}")
         data1 = json.loads(res1.text)
         
-        # 복원된 로직: 'item' 키를 먼저 확인하고, 없으면 'items' 자체를 사용 (과거의 안정된 로직)
+        # items 키가 없는 경우 빈 딕셔너리로 초기화하여 KeyError 방지
         items_data1_raw = data1.get('response', {}).get('body', {}).get('items', {})
+        # 'item' 키가 있는지 확인하고, 없으면 'items' 자체를 사용
         items_data1 = items_data1_raw.get('item') if isinstance(items_data1_raw, dict) else items_data1_raw
         
         if not items_data1:
             raise ValueError(f"복수예가 데이터 없음 (url1)")
             
-        if not isinstance(items_data1, list): # 단일 딕셔너리인 경우 리스트로 변환
+        if not isinstance(items_data1, list): # 단일 딕셔너리인 경우 리스트로 변환하여 json_normalize에 전달
             items_data1 = [items_data1]
 
         df1 = pd.json_normalize(items_data1) 
         df1 = df1[['bssamt', 'bsisPlnprc']].astype('float')
         df1['SA_rate'] = df1['bsisPlnprc'] / df1['bssamt'] * 100
         
-        # ### 중요 복원: base_price를 df1.iloc[1]['bssamt']로 설정 (이전의 안정된 로직)
+        # ### 중요 복원: base_price를 df1.iloc[1]['bssamt']로 설정 (오류 발생 이전의 안정된 로직)
         if len(df1) > 1: # 1번 인덱스가 존재하는지 확인
             base_price = df1.iloc[1]['bssamt'] 
         elif not df1.empty and 'bssamt' in df1.columns:
@@ -112,14 +113,13 @@ def analyze_gongo(gongo_nm):
         df_rates = pd.DataFrame(rates, columns=['rate']).sort_values('rate').reset_index(drop=True)
         df_rates['조합순번'] = range(1, len(df_rates)+1)
 
-        # ▶ 낙찰하한율 조회
+        # ▶ 낙찰하한율 조회 (url2)
         url2 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
         res2 = requests.get(url2, headers=headers)
         if res2.status_code != 200:
-            raise Exception(f"API 호출 실패 (낙찰하한율): HTTP {res2.status_code}")
+            raise Exception(f"API 호출 실패 (낙찰하한율 - {url2}): HTTP {res2.status_code}")
         data2 = json.loads(res2.text)
         
-        # 'item' 키를 먼저 확인하고, 없으면 'items' 자체를 사용 (과거의 안정된 로직)
         items_data2_raw = data2.get('response', {}).get('body', {}).get('items', {})
         items_data2 = items_data2_raw.get('item') if isinstance(items_data2_raw, dict) else items_data2_raw
 
@@ -136,15 +136,14 @@ def analyze_gongo(gongo_nm):
         
         sucsfbidLwltRate = float(df2.loc[0, 'sucsfbidLwltRate'])
 
-        # ▶ A값 계산 (경고 메시지 포함)
+        # ▶ A값 계산 (url3) - 오류 발생 이전의 안정된 로직으로 복원
         url3 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkBsisAmount?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
         res3 = requests.get(url3, headers=headers)
-        A_value = 0 # A값 기본값 0으로 설정
+        A_value = 0.0 # A값 기본값 0.0으로 설정 (실수형)
         
         if res3.status_code == 200:
             data3 = json.loads(res3.text)
             
-            # 'item' 키를 먼저 확인하고, 없으면 'items' 자체를 사용 (과거의 안정된 로직)
             items_a_value_raw = data3.get('response', {}).get('body', {}).get('items', {})
             items_a_value = items_a_value_raw.get('item') if isinstance(items_a_value_raw, dict) else items_a_value_raw
 
@@ -154,11 +153,13 @@ def analyze_gongo(gongo_nm):
                 
                 df3 = pd.DataFrame(items_a_value)
                 
+                # A값 관련 비용 컬럼 목록
                 cost_cols = ['sftyMngcst','sftyChckMngcst','rtrfundNon','mrfnHealthInsrprm','npnInsrprm','odsnLngtrmrcprInsrprm','qltyMngcst']
                 valid_cost_cols = [col for col in cost_cols if col in df3.columns]
                 
                 if valid_cost_cols:
-                    A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1).iloc[0]
+                    # 유효한 컬럼의 값들을 숫자로 변환하여 합계 계산
+                    A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0.0).sum(axis=1).iloc[0]
                 else:
                     st.warning(f"⚠️ 경고: 공고번호 {gongo_nm} - A값 데이터 내 유효한 비용 항목 없음. A값은 0으로 처리됩니다.")
             else:
@@ -166,11 +167,11 @@ def analyze_gongo(gongo_nm):
         else:
             st.warning(f"⚠️ 경고: 공고번호 {gongo_nm} - A값 API 호출 실패 (HTTP {res3.status_code}). A값은 0으로 처리됩니다.")
 
-        # ▶ 개찰결과 (여기서 맨 첫 번째 업체가 1순위)
+        # ▶ 개찰결과 (url4) - 여기서 맨 첫 번째 업체가 1순위
         url4 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoOpengCompt?serviceKey={service_key}&pageNo=1&numOfRows=999&bidNtceNo={gongo_nm}'
         res4 = requests.get(url4, headers=headers)
         if res4.status_code != 200:
-            raise Exception(f"API 호출 실패 (개찰결과): HTTP {res4.status_code}")
+            raise Exception(f"API 호출 실패 (개찰결과 - {url4}): HTTP {res4.status_code}")
         
         # XML 응답을 JSON으로 변환
         data4 = json.loads(json.dumps(xmltodict.parse(res4.text)))
@@ -194,14 +195,13 @@ def analyze_gongo(gongo_nm):
             if sucsfbidLwltRate != 0 and base_price != 0:
                 df4['rate'] = (((df4['bidprcAmt'] - A_value) * 100) / sucsfbidLwltRate + A_value) * 100 / base_price
                 
-                # 디버깅용: 단계별 사정율 계산 값 출력
+                # 디버깅용: 단계별 사정율 계산 값 출력 (정확성 검증)
                 st.write(f"--- {gongo_nm} - 1순위 업체 사정율 계산 단계 ---")
                 st.write(f"  bidprcAmt (입찰금액): {df4.iloc[0]['bidprcAmt']}")
                 st.write(f"  A_value (A값): {A_value}")
                 st.write(f"  sucsfbidLwltRate (낙찰하한율): {sucsfbidLwltRate}")
                 st.write(f"  base_price (기초금액): {base_price}")
                 
-                # 단계별 계산 값 출력
                 temp_val1 = df4.iloc[0]['bidprcAmt'] - A_value
                 temp_val2 = (temp_val1 * 100) / sucsfbidLwltRate
                 temp_val3 = temp_val2 + A_value
