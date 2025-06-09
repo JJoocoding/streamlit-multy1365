@@ -89,8 +89,11 @@ def analyze_gongo(gongo_nm):
         df1 = pd.json_normalize(data1['response']['body']['items'])
         df1 = df1[['bssamt', 'bsisPlnprc']].astype('float')
         df1['SA_rate'] = df1['bsisPlnprc'] / df1['bssamt'] * 100
-        base_price = df1.iloc[1]['bssamt']
-
+        
+        # ### 중요 수정: base_price를 항상 첫 번째 행의 'bssamt'로 설정
+        base_price = df1.iloc[0]['bssamt'] 
+        st.write(f"--- {gongo_nm} - 추출된 base_price: {base_price} ---") # 디버깅용
+        
         # ▶ 조합 평균 계산
         if len(df1['SA_rate']) < 4:
             raise ValueError(f"복수예가 항목이 4개 미만입니다")
@@ -113,6 +116,7 @@ def analyze_gongo(gongo_nm):
             raise ValueError(f"낙찰하한율 데이터 없음")
         df2 = pd.json_normalize(data2['response']['body']['items'])
         sucsfbidLwltRate = float(df2.loc[0, 'sucsfbidLwltRate'])
+        st.write(f"--- {gongo_nm} - 추출된 sucsfbidLwltRate: {sucsfbidLwltRate} ---") # 디버깅용
 
         # ▶ A값 계산 (A값이 없으면 0으로 처리되며, 경고 메시지는 없음)
         url3 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkBsisAmount?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
@@ -149,6 +153,7 @@ def analyze_gongo(gongo_nm):
                 # else: valid_cost_cols가 비어있으면 A_value는 초기값인 0으로 유지됨 (정상 처리)
             # else: API 응답에 'item'이 없거나 구조가 다르면 A_value는 초기값인 0으로 유지됨 (정상 처리)
         # else: API 호출 실패 시 A_value는 초기값인 0으로 유지됨 (정상 처리)
+        st.write(f"--- {gongo_nm} - 추출된 A_value: {A_value} ---") # 디버깅용
 
         # ▶ 개찰결과 (여기서 맨 첫 번째 업체가 1순위)
         url4 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoOpengCompt?serviceKey={service_key}&pageNo=1&numOfRows=999&bidNtceNo={gongo_nm}'
@@ -175,11 +180,28 @@ def analyze_gongo(gongo_nm):
 
         if not df4.empty:
             top_bidder_name = df4.iloc[0]['prcbdrNm'] # 1순위 업체명
-            
+            st.write(f"--- {gongo_nm} - 1순위 업체명: {top_bidder_name}, 입찰금액: {df4.iloc[0]['bidprcAmt']} ---") # 디버깅용
+
             # 사정율 계산식: ((입찰금액 - A값) * 100 / 낙찰하한율) + A값) * 100 / 기초금액
             # A_value는 이미 0 또는 실제 값으로 계산되어 들어옴
             if sucsfbidLwltRate != 0 and base_price != 0:
-                df4['rate'] = (((df4['bidprcAmt'] - A_value) * 100 / sucsfbidLwltRate) + A_value) * 100 / base_price
+                # ### 디버깅용: 단계별 사정율 계산 값 출력
+                df4['temp_bidprcAmt_minus_A'] = df4['bidprcAmt'] - A_value
+                df4['temp_divide_by_sucsfbidLwltRate'] = df4['temp_bidprcAmt_minus_A'] * 100 / sucsfbidLwltRate
+                df4['temp_add_A'] = df4['temp_divide_by_sucsfbidLwltRate'] + A_value
+                df4['rate'] = df4['temp_add_A'] * 100 / base_price
+
+                st.write(f"--- {gongo_nm} - 1순위 업체 사정율 계산 단계 ---")
+                st.write(f"  bidprcAmt: {df4.iloc[0]['bidprcAmt']}")
+                st.write(f"  A_value: {A_value}")
+                st.write(f"  sucsfbidLwltRate: {sucsfbidLwltRate}")
+                st.write(f"  base_price: {base_price}")
+                st.write(f"  (bidprcAmt - A_value): {df4.iloc[0]['temp_bidprcAmt_minus_A']}")
+                st.write(f"  (bidprcAmt - A_value) * 100 / sucsfbidLwltRate: {df4.iloc[0]['temp_divide_by_sucsfbidLwltRate']}")
+                st.write(f"  ((...) + A_value): {df4.iloc[0]['temp_add_A']}")
+                st.write(f"  Final Rate before rounding: {df4.iloc[0]['rate']}")
+                # ----------------------------------------------------
+
             else:
                 df4['rate'] = np.nan # 낙찰하한율이나 기초금액이 0이면 사정율 계산 불가
 
