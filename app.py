@@ -57,7 +57,7 @@ if 'gongo_nums_input_value' not in st.session_state:
 if 'analysis_completed' not in st.session_state:
     st.session_state.analysis_completed = False # 분석 완료 여부
 if 'results_by_gongo_data' not in st.session_state:
-    st.session_state.results_by_gongo_data = [] # 분석 결과 데이터
+    st.session_state.results_by_session_data = [] # 분석 결과 데이터 (이름 변경)
 if 'errors_data' not in st.session_state:
     st.session_state.errors_data = [] # 오류 메시지
 if 'processed_gongo_nums' not in st.session_state:
@@ -87,30 +87,17 @@ def analyze_gongo(gongo_nm):
         if 'response' not in data1 or 'body' not in data1['response'] or 'items' not in data1['response']['body'] or not data1['response']['body']['items']:
             raise ValueError(f"복수예가 데이터 없음")
         
-        # 복수예가 데이터를 DataFrame으로 변환. 'item'이 리스트가 아닐 경우 처리
-        items_df1 = data1['response']['body']['items']['item']
-        if not isinstance(items_df1, list):
-            items_df1 = [items_df1]
-        df1 = pd.json_normalize(items_df1)
-        
-        # 'plnprcSeCd' (예정가격구분코드)를 사용하여 기초금액 찾기
-        # '1'이 예정가격(기초금액)을 나타낸다고 가정
-        base_price_rows = df1[df1['plnprcSeCd'] == '1']
-        if not base_price_rows.empty:
-            base_price = float(base_price_rows.iloc[0]['bssamt'])
-        else:
-            # 'plnprcSeCd'가 '1'인 데이터가 없으면, 기존 로직처럼 첫 번째 bssamt를 예정가격으로 간주 (최후의 보루)
-            # 또는 오류를 발생시켜 사용자에게 알림
-            if 'bssamt' in df1.columns and not df1.empty:
-                base_price = float(df1.iloc[0]['bssamt'])
-                st.warning(f"공고번호 {gongo_nm}: 'plnprcSeCd' 1인 기초금액을 찾을 수 없습니다. 첫 번째 예정가격을 기초금액으로 사용합니다.")
-            else:
-                raise ValueError("복수예가 데이터에서 유효한 기초금액을 찾을 수 없습니다.")
+        # 복원된 로직: items가 단일 딕셔너리일 수 있으므로 리스트로 감싸고, df1 생성
+        items_data1 = data1['response']['body']['items']['item'] if 'item' in data1['response']['body']['items'] else data1['response']['body']['items']
+        if not isinstance(items_data1, list):
+            items_data1 = [items_data1]
 
-        df1['bssamt'] = pd.to_numeric(df1['bssamt'], errors='coerce')
-        df1['bsisPlnprc'] = pd.to_numeric(df1['bsisPlnprc'], errors='coerce')
+        df1 = pd.json_normalize(items_data1) # 복원된 부분
+        df1 = df1[['bssamt', 'bsisPlnprc']].astype('float')
         df1['SA_rate'] = df1['bsisPlnprc'] / df1['bssamt'] * 100
         
+        # ### 중요 복원: base_price를 df1.iloc[1]['bssamt']로 설정
+        base_price = df1.iloc[1]['bssamt'] 
         st.write(f"--- {gongo_nm} - 추출된 base_price: {base_price} ---") # 디버깅용
         
         # ▶ 조합 평균 계산
@@ -137,7 +124,7 @@ def analyze_gongo(gongo_nm):
         sucsfbidLwltRate = float(df2.loc[0, 'sucsfbidLwltRate'])
         st.write(f"--- {gongo_nm} - 추출된 sucsfbidLwltRate: {sucsfbidLwltRate} ---") # 디버깅용
 
-        # ▶ A값 계산 (A값이 없으면 0으로 처리되며, 경고 메시지는 없음)
+        # ▶ A값 계산 (경고 메시지 포함)
         url3 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkBsisAmount?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
         res3 = requests.get(url3, headers=headers)
         # --- 디버깅용: API 응답 출력 ---
@@ -145,33 +132,34 @@ def analyze_gongo(gongo_nm):
         st.code(res3.text)
         # ---------------------------------
         A_value = 0 # A값 기본값 0으로 설정
+        a_value_warning = False
 
         if res3.status_code == 200:
             data3 = json.loads(res3.text)
             
-            # API 응답 구조를 확인하고, 'item'이 있는지 확인
             if 'response' in data3 and 'body' in data3['response'] and 'items' in data3['response']['body'] and 'item' in data3['response']['body']['items']:
                 items_a_value = data3['response']['body']['items']['item']
-                
-                # 'item'이 단일 딕셔너리일 경우 리스트로 변환하여 DataFrame 생성을 용이하게 함
                 if not isinstance(items_a_value, list):
                     items_a_value = [items_a_value]
                 
                 df3 = pd.DataFrame(items_a_value)
                 
-                # A값에 포함되는 비용 컬럼들 정의
                 cost_cols = ['sftyMngcst','sftyChckMngcst','rtrfundNon','mrfnHealthInsrprm','npnInsrprm','odsnLngtrmrcprInsrprm','qltyMngcst']
-                
-                # df3에 실제로 존재하는 A값 관련 컬럼만 필터링
                 valid_cost_cols = [col for col in cost_cols if col in df3.columns]
                 
                 if valid_cost_cols:
-                    # 유효한 컬럼들의 값을 숫자로 변환하고(오류 시 NaN), NaN을 0으로 채운 후 합산
-                    # .iloc[0]을 통해 첫 번째 행의 합계만 가져옴 (첫 번째 'item'의 합계를 A값으로 사용)
                     A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1).iloc[0]
-                # else: valid_cost_cols가 비어있으면 A_value는 초기값인 0으로 유지됨 (정상 처리)
-            # else: API 응답에 'item'이 없거나 구조가 다르면 A_value는 초기값인 0으로 유지됨 (정상 처리)
-        # else: API 호출 실패 시 A_value는 초기값인 0으로 유지됨 (정상 처리)
+                else:
+                    a_value_warning = True
+            else:
+                a_value_warning = True
+        else:
+            a_value_warning = True
+
+        if a_value_warning:
+            # A값 데이터가 없을 경우 경고 메시지 반환
+            st.warning(f"⚠️ 경고: 공고번호 {gongo_nm} - A값 데이터 없음. A값은 0으로 처리됩니다.")
+
         st.write(f"--- {gongo_nm} - 추출된 A_value: {A_value} ---") # 디버깅용
 
         # ▶ 개찰결과 (여기서 맨 첫 번째 업체가 1순위)
@@ -202,7 +190,6 @@ def analyze_gongo(gongo_nm):
             st.write(f"--- {gongo_nm} - 1순위 업체명: {top_bidder_name}, 입찰금액: {df4.iloc[0]['bidprcAmt']} ---") # 디버깅용
 
             # 사정율 계산식: ((입찰금액 - A값) * 100 / 낙찰하한율) + A값) * 100 / 기초금액
-            # A_value는 이미 0 또는 실제 값으로 계산되어 들어옴
             if sucsfbidLwltRate != 0 and base_price != 0:
                 # ### 디버깅용: 단계별 사정율 계산 값 출력
                 df4['temp_bidprcAmt_minus_A'] = df4['bidprcAmt'] - A_value
@@ -213,14 +200,13 @@ def analyze_gongo(gongo_nm):
                 st.write(f"--- {gongo_nm} - 1순위 업체 사정율 계산 단계 ---")
                 st.write(f"  bidprcAmt: {df4.iloc[0]['bidprcAmt']}")
                 st.write(f"  A_value: {A_value}")
-                st.write(f"  sucsfbidLwltRate: {sucsfbidLwltRate}")
+                st.write(f"  sucsfbidLwltRate: {suc4sfbidLwltRate}")
                 st.write(f"  base_price: {base_price}")
                 st.write(f"  (bidprcAmt - A_value): {df4.iloc[0]['temp_bidprcAmt_minus_A']}")
                 st.write(f"  (bidprcAmt - A_value) * 100 / sucsfbidLwltRate: {df4.iloc[0]['temp_divide_by_sucsfbidLwltRate']}")
                 st.write(f"  ((...) + A_value): {df4.iloc[0]['temp_add_A']}")
                 st.write(f"  Final Rate before rounding: {df4.iloc[0]['rate']}")
                 # ----------------------------------------------------
-
             else:
                 df4['rate'] = np.nan # 낙찰하한율이나 기초금액이 0이면 사정율 계산 불가
 
@@ -250,7 +236,7 @@ def analyze_gongo(gongo_nm):
         df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명'] # 강조 처리를 위한 컬럼
         df_combined_gongo = df_combined_gongo.fillna('') # NaN 값을 빈 문자열로 채움
 
-        return df_combined_gongo, None, top_bidder_info # 오류 메시지 필드는 None으로 반환 (A값 경고 제거)
+        return df_combined_gongo, None, top_bidder_info # 오류 메시지 필드는 None으로 반환 (A값 경고는 직접 st.warning으로 표시)
 
     except ValueError as ve:
         # 특정 데이터 부족 등으로 인한 오류
@@ -267,7 +253,7 @@ def reset_app():
     # 모든 관련 세션 상태 초기화
     st.session_state.gongo_nums_input_value = "" 
     st.session_state.analysis_completed = False
-    st.session_state.results_by_gongo_data = []
+    st.session_state.results_by_gongo_data = [] # 변수명 통일
     st.session_state.errors_data = []
     st.session_state.processed_gongo_nums = [] 
     st.cache_data.clear() # 캐시 데이터도 초기화
