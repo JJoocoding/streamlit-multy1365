@@ -196,6 +196,7 @@ def analyze_gongo(gongo_nm):
             top_bidder_name = df4.iloc[0]['prcbdrNm']
 
             if sucsfbidLwltRate != 0 and base_price != 0:
+                # 사정율 계산식: ((입찰금액 - A값) * 100 / 낙찰하한율) + A값) * 100 / 기초금액
                 df4['rate'] = (((df4['bidprcAmt'] - A_value) * 100) / sucsfbidLwltRate + A_value) * 100 / base_price
             else:
                 df4['rate'] = np.nan
@@ -216,7 +217,241 @@ def analyze_gongo(gongo_nm):
             top_bidder_info = {"name": "개찰 결과 없음", "rate": "N/A"}
 
         # 조합 사정율과 개찰 결과 사정율을 병합
+        # Line 222
         df_combined_gongo = pd.concat([
             df_rates[['rate']].assign(업체명=df_rates['조합순번'].astype(str)), 
-            df4.rename(columns={'업체명': '업체명'})
-        ], ignore_index=True).sort_values('
+            df4[['업체명', 'rate']] # 여기에 누락된 '업체명' 컬럼을 추가했습니다.
+        ], ignore_index=True).sort_values('rate').reset_index(drop=True)
+        df_combined_gongo['rate'] = round(df_combined_gongo['rate'], 5)
+        
+        df_combined_gongo['공고번호'] = gongo_nm 
+        df_combined_gongo['강조_업체명'] = df_combined_gongo['업체명']
+        df_combined_gongo = df_combined_gongo.fillna('')
+
+        return df_combined_gongo, None, top_bidder_info 
+
+    except ValueError as ve:
+        return pd.DataFrame(), f"⚠️ 경고: 공고번호 {gongo_nm} - {ve}", top_bidder_info
+    except Exception as e:
+        return pd.DataFrame(), f"❌ 오류 발생: 공고번호 {gongo_nm} - {e}", top_bidder_info
+
+
+st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
+
+# --- "처음으로" 버튼 로직 (UI 상단으로 이동하여 항상 보이게) ---
+def reset_app():
+    st.session_state.gongo_nums_input_value = "" 
+    st.session_state.analysis_completed = False
+    st.session_state.results_by_gongo_data = [] 
+    st.session_state.errors_data = []
+    st.session_state.processed_gongo_nums = [] 
+    st.cache_data.clear()
+
+if st.session_state.analysis_completed or st.session_state.gongo_nums_input_value.strip():
+    st.button("🔄 처음으로", on_click=reset_app)
+
+if not st.session_state.analysis_completed:
+    gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", 
+                                    height=200, 
+                                    value=st.session_state.gongo_nums_input_value, 
+                                    key="gongo_input_area") 
+
+    if st.button("🚀 분석 시작", key="start_analysis_button"): 
+        st.session_state.gongo_nums_input_value = gongo_nums_input
+        
+        gongo_nums = [gn.strip() for gn in gongo_nums_input.split('\n') if gn.strip()]
+        st.session_state.processed_gongo_nums = gongo_nums
+
+        if not (1 <= len(gongo_nums) <= 10):
+            st.error("⚠️ 공고번호는 1개에서 10개까지만 입력 가능합니다.")
+            st.session_state.analysis_completed = False 
+            st.session_state.processed_gongo_nums = [] 
+        else:
+            results_by_gongo = []
+            errors = []
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            for i, gongo_nm in enumerate(gongo_nums): 
+                status_text.text(f"📊 공고번호 {gongo_nm} 분석 중... ({i+1}/{len(gongo_nums)})")
+                df_result, error_msg, top_bidder_info = analyze_gongo(gongo_nm)
+                
+                if error_msg: 
+                    errors.append(error_msg)
+                if not df_result.empty: 
+                    results_by_gongo.append({
+                        "gongo_num": gongo_nm,
+                        "df": df_result,
+                        "top_bidder": top_bidder_info
+                    })
+                progress_bar.progress((i + 1) / len(gongo_nums)) 
+
+            status_text.empty() 
+            progress_bar.empty() 
+
+            st.session_state.results_by_gongo_data = results_by_gongo 
+            st.session_state.errors_data = errors 
+            st.session_state.analysis_completed = True 
+            st.rerun() 
+
+else: 
+    results_by_gongo = st.session_state.results_by_gongo_data
+    errors = st.session_state.errors_data
+    gongo_nums = st.session_state.processed_gongo_nums 
+
+    st.markdown("---") 
+
+    if results_by_gongo:
+        st.subheader("📈 각 공고별 사정율 분석 결과")
+        
+        num_cols_per_row = 2 
+        
+        for i in range(0, len(results_by_gongo), num_cols_per_row):
+            cols = st.columns(num_cols_per_row) 
+            
+            for j, result_data in enumerate(results_by_gongo[i : i + num_cols_per_row]):
+                with cols[j]: 
+                    gongo_num = result_data["gongo_num"]
+                    df = result_data["df"]
+                    top_bidder = result_data["top_bidder"]
+
+                    if top_bidder["name"] != "개찰 결과 없음":
+                        st.markdown(f"**공고번호 {gongo_num}**: **{top_bidder['name']}** (사정율: **{top_bidder['rate']}%**)")
+                    else:
+                        st.markdown(f"**공고번호 {gongo_num}**: 개찰 결과 정보 없음")
+                    
+                    def highlight_top_bidder_individual(row, top_bidder_name):
+                        styles = [''] * len(row)
+                        if pd.notna(row['강조_업체명']) and row['강조_업체명'] == top_bidder_name:
+                            styles = ['background-color: #ffcccc'] * len(row) 
+                        elif pd.notna(row['강조_업체명']) and "대명포장중기" in row['강조_업체명']:
+                            styles = ['background-color: #ffffcc'] * len(row) 
+                        return styles
+
+                    display_df_styled = df[['rate', '강조_업체명']].style.apply(
+                        lambda row: highlight_top_bidder_individual(row, top_bidder['name']), axis=1
+                    )
+
+                    st.dataframe(
+                        display_df_styled,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(35 * len(df) + 38, 400) 
+                    )
+                    st.markdown("---") 
+
+        st.markdown("---") 
+        st.subheader("📊 통합 사정율 분석 결과") 
+
+        merged_df = pd.DataFrame()
+        top_bidder_info_for_header = {} 
+
+        if results_by_gongo:
+            all_rates = pd.concat([res['df']['rate'] for res in results_by_gongo], ignore_index=True).unique()
+            base_rates_df = pd.DataFrame({'rate': all_rates}).sort_values('rate').reset_index(drop=True)
+            merged_df = base_rates_df
+        
+        ordered_gongo_nums = gongo_nums[::-1] 
+        
+        for gongo_num_to_process in ordered_gongo_nums:
+            current_result_data = next((res for res in results_by_gongo if res['gongo_num'] == gongo_num_to_process), None)
+            
+            if current_result_data:
+                df_current_gongo = current_result_data["df"].copy()
+                top_bidder = current_result_data["top_bidder"]
+                
+                df_for_merge = df_current_gongo[['rate', '강조_업체명']].copy()
+                df_for_merge.rename(columns={'강조_업체명': f'{gongo_num_to_process}'}, inplace=True) 
+                
+                merged_df = pd.merge(merged_df, df_for_merge, on='rate', how='outer')
+                
+                top_bidder_info_for_header[gongo_num_to_process] = top_bidder 
+
+        if not merged_df.empty:
+            final_merged_df = merged_df.sort_values(by='rate').reset_index(drop=True)
+            
+            final_merged_df = final_merged_df.fillna('') 
+
+            columns_order = ['rate'] + ordered_gongo_nums 
+            final_merged_df = final_merged_df[columns_order]
+
+            column_config_dict = {"rate": "Rate"} 
+
+            for gongo_num_col in ordered_gongo_nums: 
+                top_info = top_bidder_info_for_header.get(gongo_num_col, {"name": "정보 없음", "rate": "N/A"})
+                
+                header_text = f"{gongo_num_col}" 
+                if top_info["name"] != "개찰 결과 없음" and top_info["rate"] != "N/A":
+                    header_text += f"\n({top_info['rate']:.5f}%)" 
+                else:
+                    header_text += "\n(정보 없음)" 
+                
+                column_config_dict[gongo_num_col] = st.column_config.TextColumn(
+                    label=header_text, 
+                    width="small" 
+                )
+            
+            def highlight_top_bidder_in_merged_table(s, top_bidder_info_map):
+                current_gongo_num_raw = s.name 
+                top_info = top_bidder_info_map.get(current_gongo_num_raw) 
+                
+                styles = []
+                for val in s:
+                    style = ''
+                    if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and \
+                       pd.notna(val) and val == top_info['name']:
+                        style = 'background-color: #ffcccc' 
+                    elif pd.notna(val) and "대명포장중기" in val and \
+                         not (top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and val == top_info['name']):
+                        style = 'background-color: #ffffcc' 
+                    styles.append(style)
+                return styles 
+
+            columns_to_style = [col for col in final_merged_df.columns if col != 'rate']
+
+            styled_final_merged_df = final_merged_df.style.apply(
+                lambda s: highlight_top_bidder_in_merged_table(s, top_bidder_info_for_header), 
+                subset=columns_to_style
+            )
+            
+            st.dataframe(
+                styled_final_merged_df,
+                use_container_width=True,
+                hide_index=True,
+                height=min(35 * len(final_merged_df) + 38, 600),
+                column_config=column_config_dict 
+            )
+        else:
+            st.info("분석할 유효한 공고번호가 없거나 데이터 병합에 실패했습니다.")
+
+
+        st.subheader("📥 전체 결과 다운로드")
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"통합_사정율분석_{now}.xlsx"
+        
+        if not final_merged_df.empty: 
+            excel_buffer = io.BytesIO()
+            styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
+            excel_buffer.seek(0)
+            
+            st.download_button(
+                label="통합 결과 엑셀 다운로드",
+                data=excel_buffer,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_button_key" 
+            )
+        else:
+            st.info("다운로드할 통합 결과 데이터가 없습니다.")
+        
+
+    else:
+        st.warning("분석할 유효한 공고번호가 없거나 모든 공고번호에서 오류가 발생했습니다.")
+
+    if errors:
+        st.subheader("⚠️ 분석 중 발생한 경고 및 오류:")
+        for err in errors:
+            st.write(err)
+    elif not results_by_gongo and not errors and st.session_state.gongo_nums_input_value.strip():
+         st.info("입력된 공고번호에 대한 분석 결과가 없습니다. 공고번호를 다시 확인해주세요.")
