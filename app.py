@@ -57,7 +57,7 @@ if 'gongo_nums_input_value' not in st.session_state:
 if 'analysis_completed' not in st.session_state:
     st.session_state.analysis_completed = False # 분석 완료 여부
 if 'results_by_gongo_data' not in st.session_state:
-    st.session_state.results_by_session_data = [] # 분석 결과 데이터 (이름 변경)
+    st.session_state.results_by_gongo_data = [] # 분석 결과 데이터 (이름 변경)
 if 'errors_data' not in st.session_state:
     st.session_state.errors_data = [] # 오류 메시지
 if 'processed_gongo_nums' not in st.session_state:
@@ -88,16 +88,31 @@ def analyze_gongo(gongo_nm):
             raise ValueError(f"복수예가 데이터 없음")
         
         # 복원된 로직: items가 단일 딕셔너리일 수 있으므로 리스트로 감싸고, df1 생성
-        items_data1 = data1['response']['body']['items']['item'] if 'item' in data1['response']['body']['items'] else data1['response']['body']['items']
-        if not isinstance(items_data1, list):
+        # 'item' 키를 먼저 확인하고, 없으면 'items' 자체를 사용
+        items_data1_raw = data1['response']['body']['items']
+        if isinstance(items_data1_raw, dict) and 'item' in items_data1_raw:
+            items_data1 = items_data1_raw['item']
+        else:
+            items_data1 = items_data1_raw
+            
+        if not isinstance(items_data1, list): # 단일 딕셔너리인 경우 리스트로 변환
             items_data1 = [items_data1]
 
-        df1 = pd.json_normalize(items_data1) # 복원된 부분
+        df1 = pd.json_normalize(items_data1) 
         df1 = df1[['bssamt', 'bsisPlnprc']].astype('float')
         df1['SA_rate'] = df1['bsisPlnprc'] / df1['bssamt'] * 100
         
         # ### 중요 복원: base_price를 df1.iloc[1]['bssamt']로 설정
-        base_price = df1.iloc[1]['bssamt'] 
+        if len(df1) > 1: # 1번 인덱스가 존재하는지 확인
+            base_price = df1.iloc[1]['bssamt'] 
+        else:
+            # 데이터가 1개 이하일 경우, 첫 번째 bssamt를 사용하거나 오류 처리
+            if not df1.empty and 'bssamt' in df1.columns:
+                base_price = df1.iloc[0]['bssamt']
+                st.warning(f"공고번호 {gongo_nm}: 복수예가 항목이 2개 미만입니다. 첫 번째 예정가격을 기초금액으로 사용합니다.")
+            else:
+                raise ValueError("복수예가 데이터에서 유효한 기초금액을 찾을 수 없습니다.")
+
         st.write(f"--- {gongo_nm} - 추출된 base_price: {base_price} ---") # 디버깅용
         
         # ▶ 조합 평균 계산
@@ -120,7 +135,22 @@ def analyze_gongo(gongo_nm):
         data2 = json.loads(res2.text)
         if 'response' not in data2 or 'body' not in data2['response'] or 'items' not in data2['response']['body'] or not data2['response']['body']['items']:
             raise ValueError(f"낙찰하한율 데이터 없음")
-        df2 = pd.json_normalize(data2['response']['body']['items'])
+        
+        # items가 단일 딕셔너리일 경우 리스트로 감싸서 json_normalize에 전달
+        items_data2_raw = data2['response']['body']['items']
+        if isinstance(items_data2_raw, dict) and 'item' in items_data2_raw:
+            items_data2 = items_data2_raw['item']
+        else:
+            items_data2 = items_data2_raw
+
+        if not isinstance(items_data2, list):
+            items_data2 = [items_data2]
+
+        df2 = pd.json_normalize(items_data2)
+        
+        if df2.empty or 'sucsfbidLwltRate' not in df2.columns:
+            raise ValueError(f"낙찰하한율 데이터에 'sucsfbidLwltRate' 컬럼이 없거나 비어 있습니다.")
+        
         sucsfbidLwltRate = float(df2.loc[0, 'sucsfbidLwltRate'])
         st.write(f"--- {gongo_nm} - 추출된 sucsfbidLwltRate: {sucsfbidLwltRate} ---") # 디버깅용
 
@@ -132,13 +162,16 @@ def analyze_gongo(gongo_nm):
         st.code(res3.text)
         # ---------------------------------
         A_value = 0 # A값 기본값 0으로 설정
-        a_value_warning = False
+        a_value_warning_displayed = False
 
         if res3.status_code == 200:
             data3 = json.loads(res3.text)
             
-            if 'response' in data3 and 'body' in data3['response'] and 'items' in data3['response']['body'] and 'item' in data3['response']['body']['items']:
-                items_a_value = data3['response']['body']['items']['item']
+            # items_a_value 처리 로직 강화
+            items_a_value_raw = data3.get('response', {}).get('body', {}).get('items', {})
+            items_a_value = items_a_value_raw.get('item') if isinstance(items_a_value_raw, dict) else items_a_value_raw
+
+            if items_a_value:
                 if not isinstance(items_a_value, list):
                     items_a_value = [items_a_value]
                 
@@ -150,14 +183,13 @@ def analyze_gongo(gongo_nm):
                 if valid_cost_cols:
                     A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1).iloc[0]
                 else:
-                    a_value_warning = True
+                    a_value_warning_displayed = True
             else:
-                a_value_warning = True
+                a_value_warning_displayed = True
         else:
-            a_value_warning = True
+            a_value_warning_displayed = True
 
-        if a_value_warning:
-            # A값 데이터가 없을 경우 경고 메시지 반환
+        if a_value_warning_displayed:
             st.warning(f"⚠️ 경고: 공고번호 {gongo_nm} - A값 데이터 없음. A값은 0으로 처리됩니다.")
 
         st.write(f"--- {gongo_nm} - 추출된 A_value: {A_value} ---") # 디버깅용
@@ -189,23 +221,26 @@ def analyze_gongo(gongo_nm):
             top_bidder_name = df4.iloc[0]['prcbdrNm'] # 1순위 업체명
             st.write(f"--- {gongo_nm} - 1순위 업체명: {top_bidder_name}, 입찰금액: {df4.iloc[0]['bidprcAmt']} ---") # 디버깅용
 
-            # 사정율 계산식: ((입찰금액 - A값) * 100 / 낙찰하한율) + A값) * 100 / 기초금액
+            # ### 사정율 계산식 복원 및 오타 수정: ((입찰금액 - A값) * 100 / 낙찰하한율) + A값) * 100 / 기초금액
             if sucsfbidLwltRate != 0 and base_price != 0:
-                # ### 디버깅용: 단계별 사정율 계산 값 출력
-                df4['temp_bidprcAmt_minus_A'] = df4['bidprcAmt'] - A_value
-                df4['temp_divide_by_sucsfbidLwltRate'] = df4['temp_bidprcAmt_minus_A'] * 100 / sucsfbidLwltRate
-                df4['temp_add_A'] = df4['temp_divide_by_sucsfbidLwltRate'] + A_value
-                df4['rate'] = df4['temp_add_A'] * 100 / base_price
-
+                df4['rate'] = (((df4['bidprcAmt'] - A_value) * 100) / sucsfbidLwltRate + A_value) * 100 / base_price
+                
+                # 디버깅용: 단계별 사정율 계산 값 출력 (오타 수정 반영)
                 st.write(f"--- {gongo_nm} - 1순위 업체 사정율 계산 단계 ---")
                 st.write(f"  bidprcAmt: {df4.iloc[0]['bidprcAmt']}")
                 st.write(f"  A_value: {A_value}")
-                st.write(f"  sucsfbidLwltRate: {sucsfbidLwltRate}")
+                st.write(f"  sucsfbidLwltRate: {sucsfbidLwltRate}") # 오타 수정
                 st.write(f"  base_price: {base_price}")
-                st.write(f"  (bidprcAmt - A_value): {df4.iloc[0]['temp_bidprcAmt_minus_A']}")
-                st.write(f"  (bidprcAmt - A_value) * 100 / sucsfbidLwltRate: {df4.iloc[0]['temp_divide_by_sucsfbidLwltRate']}")
-                st.write(f"  ((...) + A_value): {df4.iloc[0]['temp_add_A']}")
-                st.write(f"  Final Rate before rounding: {df4.iloc[0]['rate']}")
+                # 추가 디버깅을 위해 중간 계산 값도 표시 (선택 사항)
+                temp_bidprcAmt_minus_A = df4.iloc[0]['bidprcAmt'] - A_value
+                temp_divide_by_sucsfbidLwltRate = (temp_bidprcAmt_minus_A * 100) / sucsfbidLwltRate
+                temp_add_A = temp_divide_by_sucsfbidLwltRate + A_value
+                final_rate_before_rounding = (temp_add_A * 100) / base_price
+                
+                st.write(f"  (bidprcAmt - A_value): {temp_bidprcAmt_minus_A}")
+                st.write(f"  ((...) * 100 / sucsfbidLwltRate): {temp_divide_by_sucsfbidLwltRate}")
+                st.write(f"  ((...) + A_value): {temp_add_A}")
+                st.write(f"  Final Rate before rounding: {final_rate_before_rounding}")
                 # ----------------------------------------------------
             else:
                 df4['rate'] = np.nan # 낙찰하한율이나 기초금액이 0이면 사정율 계산 불가
@@ -253,7 +288,7 @@ def reset_app():
     # 모든 관련 세션 상태 초기화
     st.session_state.gongo_nums_input_value = "" 
     st.session_state.analysis_completed = False
-    st.session_state.results_by_gongo_data = [] # 변수명 통일
+    st.session_state.results_by_gongo_data = [] 
     st.session_state.errors_data = []
     st.session_state.processed_gongo_nums = [] 
     st.cache_data.clear() # 캐시 데이터도 초기화
@@ -453,7 +488,6 @@ else: # st.session_state.analysis_completed가 True일 경우 (즉, 분석이 �
         
         if not final_merged_df.empty: 
             excel_buffer = io.BytesIO()
-            # Styler 객체를 직접 엑셀로 저장. 이전에 사용된 to_excel(index=False) 방식과 동일하게 작동
             styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
             excel_buffer.seek(0)
             
