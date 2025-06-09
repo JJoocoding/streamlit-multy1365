@@ -112,9 +112,9 @@ def analyze_gongo(gongo_nm):
         if res3.status_code != 200:
             raise Exception(f"API 호출 실패 (A값): HTTP {res3.status_code}")
         data3 = json.loads(res3.text)
-        if 'response' not in data3 or 'body' not in data3['response'] or 'items' not in data3['response']['body'] or not data3['response']['body']['items']:
-            raise ValueError(f"A값 데이터 없음")
-        df3 = pd.json_normalize(data3['response']['body']['items'])
+        if 'response' not in data3 or 'body' not in data3['response'] or 'items' not in data3['response']['body'] or 'item' not in data3['response']['body']['items']:
+             raise ValueError(f"A값 데이터 없음")
+        df3 = pd.json_normalize(data3['response']['body']['items']['item'])
         cost_cols = ['sftyMngcst','sftyChckMngcst','rtrfundNon','mrfnHealthInsrprm','npnInsrprm','odsnLngtrmrcprInsrprm','qltyMngcst']
         valid_cost_cols = [col for col in cost_cols if col in df3.columns]
         if not valid_cost_cols:
@@ -194,10 +194,11 @@ def reset_app():
     st.session_state.errors_data = []
     st.session_state.processed_gongo_nums = [] 
     st.cache_data.clear() # 캐시 데이터도 초기화
-    st.rerun() # 앱 재실행
 
-# "처음으로" 버튼은 분석이 완료된 후에만 표시 (또는 분석 시작 전에도 표시하여 초기화 기능 제공)
-# 여기서는 분석이 완료되었거나, 이미 입력값이 있는 상태라면 표시
+    # st.rerun()을 콜백에서 직접 호출하지 않습니다.
+    # 대신, 변경된 session_state가 다음 Streamlit 실행 주기에서 UI를 초기 상태로 렌더링하게 합니다.
+
+# "처음으로" 버튼은 분석이 완료되었거나, 이미 입력값이 있는 상태라면 표시
 if st.session_state.analysis_completed or st.session_state.gongo_nums_input_value.strip():
     if st.button("🔄 처음으로", on_click=reset_app):
         pass # 클릭 시 reset_app 함수가 호출되므로 추가적인 동작은 필요 없음
@@ -246,7 +247,7 @@ if not st.session_state.analysis_completed:
             st.session_state.results_by_gongo_data = results_by_gongo 
             st.session_state.errors_data = errors 
             st.session_state.analysis_completed = True 
-            st.rerun() 
+            st.rerun() # 분석 시작 버튼 클릭 후에는 rerun을 통해 결과 화면으로 전환
 else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
     results_by_gongo = st.session_state.results_by_gongo_data
     errors = st.session_state.errors_data
@@ -392,7 +393,6 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"통합_사정율분석_{now}.xlsx"
         
-        # st.form 제거, download_button을 직접 사용
         if not final_merged_df.empty: 
             excel_buffer = io.BytesIO()
             styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
