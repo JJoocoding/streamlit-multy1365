@@ -67,8 +67,7 @@ if 'processed_gongo_nums' not in st.session_state:
 @st.cache_data(ttl=3600)
 def analyze_gongo(gongo_nm):
     top_bidder_info = {"name": "정보 없음", "rate": "N/A"}
-    # A값 관련 경고를 별도로 관리
-    a_value_warning = None 
+    # A값 관련 경고 메시지는 더 이상 필요 없음
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         service_key = st.secrets.get("SERVICE_KEY", None)
@@ -115,7 +114,7 @@ def analyze_gongo(gongo_nm):
         df2 = pd.json_normalize(data2['response']['body']['items'])
         sucsfbidLwltRate = float(df2.loc[0, 'sucsfbidLwltRate'])
 
-        # ▶ A값 계산 - A값이 없을 경우 0으로 처리하고 경고
+        # ▶ A값 계산 - A값이 없을 경우 0으로 처리 (경고 메시지 없음)
         url3 = f'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkBsisAmount?inqryDiv=2&bidNtceNo={gongo_nm}&pageNo=1&numOfRows=10&type=json&ServiceKey={service_key}'
         res3 = requests.get(url3, headers=headers)
         # --- 디버깅용: API 응답 출력 ---
@@ -123,29 +122,29 @@ def analyze_gongo(gongo_nm):
         st.code(res3.text)
         # ---------------------------------
         A_value = 0 # A값 기본값 0으로 설정
-        if res3.status_code != 200:
-            # API 호출 실패 시 A_value를 0으로 유지하고 경고 메시지 설정
-            a_value_warning = f"⚠️ 경고: 공고번호 {gongo_nm} - A값 API 호출 실패 (HTTP {res3.status_code}). A값은 0으로 처리됩니다."
-        else:
+
+        if res3.status_code == 200:
             data3 = json.loads(res3.text)
-            # A값 데이터 유효성 검사 후, 없을 경우 경고 메시지 설정
-            if 'response' not in data3 or 'body' not in data3['response'] or 'items' not in data3['response']['body'] or 'item' not in data3['response']['body']['items']:
-                a_value_warning = f"⚠️ 경고: 공고번호 {gongo_nm} - A값 데이터 없음. A값은 0으로 처리됩니다."
-            else:
+            
+            if 'response' in data3 and 'body' in data3['response'] and 'items' in data3['response']['body'] and 'item' in data3['response']['body']['items']:
                 items_a_value = data3['response']['body']['items']['item']
+                
                 if not isinstance(items_a_value, list):
                     items_a_value = [items_a_value]
                 
                 df3 = pd.DataFrame(items_a_value)
                 
+                # A값에 포함되는 비용 컬럼들
                 cost_cols = ['sftyMngcst','sftyChckMngcst','rtrfundNon','mrfnHealthInsrprm','npnInsrprm','odsnLngtrmrcprInsrprm','qltyMngcst']
+                
+                # df3에 실제로 존재하는 A값 관련 컬럼만 필터링
                 valid_cost_cols = [col for col in cost_cols if col in df3.columns]
                 
-                if not valid_cost_cols:
-                    a_value_warning = f"⚠️ 경고: 공고번호 {gongo_nm} - A값 관련 컬럼 없음. A값은 0으로 처리됩니다."
-                else:
+                if valid_cost_cols:
+                    # 유효한 컬럼들의 값을 숫자로 변환하고(오류 시 NaN), NaN을 0으로 채운 후 합산
+                    # .iloc[0]을 통해 첫 번째 행의 합계만 가져옴 (데이터가 여러 행일 경우를 대비)
                     A_value = df3[valid_cost_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1).iloc[0]
-
+                # else: valid_cost_cols가 비어있으면 A_value는 초기값인 0으로 유지됨
 
         # ▶ 개찰결과 (여기서 맨 첫 번째 업체가 1순위)
         url4 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoOpengCompt?serviceKey={service_key}&pageNo=1&numOfRows=999&bidNtceNo={gongo_nm}'
@@ -172,7 +171,7 @@ def analyze_gongo(gongo_nm):
             top_bidder_name = df4.iloc[0]['prcbdrNm']
             
             if sucsfbidLwltRate != 0 and base_price != 0:
-                # A_value가 0인 경우도 포함하여 계산 (이제 A_value는 확실히 숫자)
+                # A_value는 이제 0 또는 실제 값으로 계산되어 들어옴
                 df4['rate'] = (((df4['bidprcAmt'] - A_value) * 100 / sucsfbidLwltRate) + A_value) * 100 / base_price
             else:
                 df4['rate'] = np.nan
@@ -204,11 +203,7 @@ def analyze_gongo(gongo_nm):
         
         df_combined_gongo = df_combined_gongo.fillna('') 
 
-        # A값 관련 경고가 있다면, 반환되는 error_msg에 추가
-        if a_value_warning:
-            return df_combined_gongo, a_value_warning, top_bidder_info
-        else:
-            return df_combined_gongo, None, top_bidder_info 
+        return df_combined_gongo, None, top_bidder_info # A값 관련 경고는 이제 반환하지 않음
 
     except ValueError as ve:
         return pd.DataFrame(), f"⚠️ 경고: 공고번호 {gongo_nm} - {ve}", top_bidder_info
@@ -227,10 +222,12 @@ def reset_app():
     st.session_state.errors_data = []
     st.session_state.processed_gongo_nums = [] 
     st.cache_data.clear() # 캐시 데이터도 초기화
+    # st.rerun() # -> 이 부분이 "Calling st.rerun() within a callback is a no-op." 경고의 원인. 제거
 
 if st.session_state.analysis_completed or st.session_state.gongo_nums_input_value.strip():
-    if st.button("🔄 처음으로", on_click=reset_app):
-        pass
+    # on_click에 reset_app을 연결하면, reset_app 함수 내부에서 rerun을 호출할 필요 없음.
+    # session_state가 변경되면 streamlit이 자동으로 리렌더링함.
+    st.button("🔄 처음으로", on_click=reset_app)
 
 if not st.session_state.analysis_completed:
     gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", 
@@ -275,8 +272,9 @@ if not st.session_state.analysis_completed:
             st.session_state.results_by_gongo_data = results_by_gongo 
             st.session_state.errors_data = errors 
             st.session_state.analysis_completed = True 
-            st.rerun() 
-else: 
+            st.rerun() # 분석 완료 후에는 명시적으로 rerun 호출하여 결과 UI 표시
+
+else: # st.session_state.analysis_completed가 True일 경우 (즉, 분석이 완료된 경우)
     results_by_gongo = st.session_state.results_by_gongo_data
     errors = st.session_state.errors_data
     gongo_nums = st.session_state.processed_gongo_nums 
