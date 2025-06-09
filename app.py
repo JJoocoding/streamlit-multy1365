@@ -200,7 +200,7 @@ def analyze_gongo(gongo_nm):
                 st.write(f"--- {gongo_nm} - 1순위 업체 사정율 계산 단계 ---")
                 st.write(f"  bidprcAmt: {df4.iloc[0]['bidprcAmt']}")
                 st.write(f"  A_value: {A_value}")
-                st.write(f"  sucsfbidLwltRate: {suc4sfbidLwltRate}")
+                st.write(f"  sucsfbidLwltRate: {sucsfbidLwltRate}")
                 st.write(f"  base_price: {base_price}")
                 st.write(f"  (bidprcAmt - A_value): {df4.iloc[0]['temp_bidprcAmt_minus_A']}")
                 st.write(f"  (bidprcAmt - A_value) * 100 / sucsfbidLwltRate: {df4.iloc[0]['temp_divide_by_sucsfbidLwltRate']}")
