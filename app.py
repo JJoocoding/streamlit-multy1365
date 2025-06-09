@@ -51,17 +51,17 @@ display_width = st.selectbox("📏 표 표시 너비 설정", ["자동(전체 �
 use_wide = display_width == "자동(전체 너비)" 
 
 # --- Session State 초기화 및 관리 ---
+# 앱의 시작 상태를 정의
 if 'gongo_nums_input_value' not in st.session_state:
     st.session_state.gongo_nums_input_value = ""
 if 'analysis_completed' not in st.session_state:
-    st.session_state.analysis_completed = False
+    st.session_state.analysis_completed = False # 분석 완료 여부
 if 'results_by_gongo_data' not in st.session_state:
-    st.session_state.results_by_gongo_data = []
+    st.session_state.results_by_gongo_data = [] # 분석 결과 데이터
 if 'errors_data' not in st.session_state:
-    st.session_state.errors_data = []
-# gongo_nums 리스트 자체를 session_state에 저장
+    st.session_state.errors_data = [] # 오류 메시지
 if 'processed_gongo_nums' not in st.session_state:
-    st.session_state.processed_gongo_nums = []
+    st.session_state.processed_gongo_nums = [] # 처리된 공고번호 목록
 
 # --- analyze_gongo 함수 정의 (최상단) ---
 @st.cache_data(ttl=3600)
@@ -70,10 +70,9 @@ def analyze_gongo(gongo_nm):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         # st.secrets는 앱이 로드될 때 한 번만 호출되는 것이 안정적
-        service_key = st.secrets.get("SERVICE_KEY", "YOUR_DEFAULT_SERVICE_KEY_IF_NOT_SET")
-        if service_key == "YOUR_DEFAULT_SERVICE_KEY_IF_NOT_SET":
-            raise Exception("SERVICE_KEY가 Streamlit Secrets에 설정되지 않았습니다.")
-
+        service_key = st.secrets.get("SERVICE_KEY", None) # 기본값을 None으로 변경하여 명시적인 에러 메시지 유도
+        if service_key is None or not service_key.strip():
+            raise Exception("Streamlit Secrets에 'SERVICE_KEY'가 설정되지 않았거나 비어 있습니다.")
 
         # ▶ 복수예가 상세
         url1 = f'http://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoCnstwkPreparPcDetail?inqryDiv=2&bidNtceNo={gongo_nm}&bidNtceOrd=00&pageNo=1&numOfRows=15&type=json&ServiceKey={service_key}'
@@ -185,6 +184,24 @@ def analyze_gongo(gongo_nm):
 
 st.subheader("🔍 분석할 공고번호를 1개에서 10개까지 입력하세요 (줄바꿈으로 구분)")
 
+# --- "처음으로" 버튼 로직 (UI 상단으로 이동하여 항상 보이게) ---
+# analysis_completed 상태와 관계없이 항상 보이는 "처음으로" 버튼
+def reset_app():
+    # 모든 관련 세션 상태 초기화
+    st.session_state.gongo_nums_input_value = "" 
+    st.session_state.analysis_completed = False
+    st.session_state.results_by_gongo_data = []
+    st.session_state.errors_data = []
+    st.session_state.processed_gongo_nums = [] 
+    st.cache_data.clear() # 캐시 데이터도 초기화
+    st.rerun() # 앱 재실행
+
+# "처음으로" 버튼은 분석이 완료된 후에만 표시 (또는 분석 시작 전에도 표시하여 초기화 기능 제공)
+# 여기서는 분석이 완료되었거나, 이미 입력값이 있는 상태라면 표시
+if st.session_state.analysis_completed or st.session_state.gongo_nums_input_value.strip():
+    if st.button("🔄 처음으로", on_click=reset_app):
+        pass # 클릭 시 reset_app 함수가 호출되므로 추가적인 동작은 필요 없음
+
 # 분석이 완료되지 않았을 때만 입력창과 '분석 시작' 버튼 표시
 if not st.session_state.analysis_completed:
     gongo_nums_input = st.text_area("예시: \n20230123456\n20230123457\n...", 
@@ -192,16 +209,16 @@ if not st.session_state.analysis_completed:
                                     value=st.session_state.gongo_nums_input_value, 
                                     key="gongo_input_area") 
 
-    if st.button("분석 시작", key="start_analysis_button"): # 버튼에 고유 키 추가
+    if st.button("🚀 분석 시작", key="start_analysis_button"): 
         st.session_state.gongo_nums_input_value = gongo_nums_input 
         
         gongo_nums = [gn.strip() for gn in gongo_nums_input.split('\n') if gn.strip()]
-        st.session_state.processed_gongo_nums = gongo_nums # 처리할 공고번호 리스트 저장
+        st.session_state.processed_gongo_nums = gongo_nums 
 
         if not (1 <= len(gongo_nums) <= 10):
             st.error("⚠️ 공고번호는 1개에서 10개까지만 입력 가능합니다.")
             st.session_state.analysis_completed = False 
-            st.session_state.processed_gongo_nums = [] # 오류 시 초기화
+            st.session_state.processed_gongo_nums = [] 
         else:
             results_by_gongo = []
             errors = []
@@ -209,7 +226,7 @@ if not st.session_state.analysis_completed:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            for i, gongo_nm in enumerate(gongo_nums): # 여기서 gongo_nums는 session_state에 저장된 값
+            for i, gongo_nm in enumerate(gongo_nums): 
                 status_text.text(f"📊 공고번호 {gongo_nm} 분석 중... ({i+1}/{len(gongo_nums)})")
                 df_result, error_msg, top_bidder_info = analyze_gongo(gongo_nm)
                 
@@ -233,7 +250,7 @@ if not st.session_state.analysis_completed:
 else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
     results_by_gongo = st.session_state.results_by_gongo_data
     errors = st.session_state.errors_data
-    gongo_nums = st.session_state.processed_gongo_nums # session_state에서 공고 번호 목록 가져옴
+    gongo_nums = st.session_state.processed_gongo_nums 
 
     st.markdown("---") 
 
@@ -263,13 +280,12 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
                         styles = [''] * len(row)
                         # 1순위 업체 (빨간색)
                         if pd.notna(row['강조_업체명']) and row['강조_업체명'] == top_bidder_name:
-                            styles = ['background-color: #ffcccc'] * len(row) # 연한 빨간색
+                            styles = ['background-color: #ffcccc'] * len(row) 
                         # 대명포장중기 (노란색) - 1순위 업체가 아닌 경우에만 적용
                         elif pd.notna(row['강조_업체명']) and "대명포장중기" in row['강조_업체명']:
-                            styles = ['background-color: #ffffcc'] * len(row) # 연한 노란색
+                            styles = ['background-color: #ffffcc'] * len(row) 
                         return styles
 
-                    # '강조_업체명'에는 이제 순수 업체명이 들어가므로 top_bidder['name']과 직접 비교
                     display_df_styled = df[['rate', '강조_업체명']].style.apply(
                         lambda row: highlight_top_bidder_individual(row, top_bidder['name']), axis=1
                     )
@@ -294,8 +310,7 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
             base_rates_df = pd.DataFrame({'rate': all_rates}).sort_values('rate').reset_index(drop=True)
             merged_df = base_rates_df
         
-        # 컬럼 순서를 위한 리스트 (rate, 그리고 뒤집힌 공고번호 순서)
-        ordered_gongo_nums = gongo_nums[::-1] # session_state.processed_gongo_nums의 역순
+        ordered_gongo_nums = gongo_nums[::-1] 
         
         for gongo_num_to_process in ordered_gongo_nums:
             current_result_data = next((res for res in results_by_gongo if res['gongo_num'] == gongo_num_to_process), None)
@@ -346,11 +361,11 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
                     # 1순위 업체 (빨간색)
                     if top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and \
                        pd.notna(val) and val == top_info['name']:
-                        style = 'background-color: #ffcccc' # 연한 빨간색
+                        style = 'background-color: #ffcccc' 
                     # 대명포장중기 (노란색) - 1순위 업체가 아닌 경우에만 적용 (빨간색 우선)
                     elif pd.notna(val) and "대명포장중기" in val and \
                          not (top_info and top_info['name'] != "정보 없음" and top_info['name'] != "개찰 결과 없음" and val == top_info['name']):
-                        style = 'background-color: #ffffcc' # 연한 노란색
+                        style = 'background-color: #ffffcc' 
                     styles.append(style)
                 return styles 
 
@@ -377,40 +392,22 @@ else: # analysis_completed가 True일 때 (분석 결과 화면 표시)
         now = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"통합_사정율분석_{now}.xlsx"
         
-        # st.form 내부에 다운로드 버튼을 배치하여 앱 재실행 방지
-        # form_key를 고유하게 설정합니다.
-        with st.form(key="excel_download_form"): 
-            if not final_merged_df.empty: 
-                excel_buffer = io.BytesIO()
-                styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
-                excel_buffer.seek(0)
-                
-                st.download_button(
-                    label="통합 결과 엑셀 다운로드",
-                    data=excel_buffer,
-                    file_name=filename,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_button_key" # 다운로드 버튼에도 고유 키 추가
-                )
-            else:
-                st.info("다운로드할 통합 결과 데이터가 없습니다.")
+        # st.form 제거, download_button을 직접 사용
+        if not final_merged_df.empty: 
+            excel_buffer = io.BytesIO()
+            styled_final_merged_df.to_excel(excel_buffer, index=False, engine='openpyxl') 
+            excel_buffer.seek(0)
             
-            # 폼 제출 버튼이 없어도 download_button은 독립적으로 동작합니다.
-            st.form_submit_button("숨겨진 제출 버튼 (클릭 불필요)", help="이 버튼은 기능에 영향을 주지 않습니다.", disabled=True) 
-
-        # --- "처음으로" 버튼 추가 ---
-        st.markdown("---")
-        def reset_app():
-            # 세션 상태 초기화
-            st.session_state.gongo_nums_input_value = "" 
-            st.session_state.analysis_completed = False
-            st.session_state.results_by_gongo_data = []
-            st.session_state.errors_data = []
-            st.session_state.processed_gongo_nums = [] # 처리된 공고번호 목록도 초기화
-            st.cache_data.clear() # 캐시 데이터도 초기화 (필요시)
-            st.rerun() # 앱 재실행
-
-        st.button("처음으로", on_click=reset_app) # 버튼 클릭 시 reset_app 함수 호출
+            st.download_button(
+                label="통합 결과 엑셀 다운로드",
+                data=excel_buffer,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_button_key" 
+            )
+        else:
+            st.info("다운로드할 통합 결과 데이터가 없습니다.")
+        
 
     else:
         st.warning("분석할 유효한 공고번호가 없거나 모든 공고번호에서 오류가 발생했습니다.")
